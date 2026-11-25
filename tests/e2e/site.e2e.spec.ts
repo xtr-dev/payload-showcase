@@ -97,8 +97,9 @@ test.describe('accounts', () => {
     await expect(page.getByRole('heading', { name: 'Booking for Pim Jansen' })).toBeVisible()
     await page.getByRole('button', { name: /Reserve seat/ }).click()
 
-    await page.waitForURL(/\/account\?booked=KC-/)
-    await expect(page.getByText('Seat reserved')).toBeVisible()
+    // Checkout (payload-billing) sends the visitor to the payment page; the seat is held meanwhile.
+    await page.waitForURL(/\/api\/payload-billing\/test\/payment\//)
+    await page.goto('/account')
     const bookings = page.getByTestId('bookings')
     await expect(bookings.getByRole('listitem')).toHaveCount(1)
     await expect(bookings).toContainText('Awaiting payment')

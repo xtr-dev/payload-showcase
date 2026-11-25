@@ -4,4 +4,5 @@ allowBuilds:
   unrs-resolver: true
   better-sqlite3: true
 minimumReleaseAgeExclude:
+  - '@xtr-dev/payload-billing@0.4.0'
   - '@xtr-dev/payload-feature-flags@0.1.0'
