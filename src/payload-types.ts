@@ -73,7 +73,11 @@ export interface Config {
     sessions: Session;
     bookings: Booking;
     'membership-plans': MembershipPlan;
+    'mail-outbox': MailOutbox;
+    'email-templates': EmailTemplate;
+    emails: Email;
     'payload-kv': PayloadKv;
+    'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
     'payload-migrations': PayloadMigration;
@@ -86,7 +90,11 @@ export interface Config {
     sessions: SessionsSelect<false> | SessionsSelect<true>;
     bookings: BookingsSelect<false> | BookingsSelect<true>;
     'membership-plans': MembershipPlansSelect<false> | MembershipPlansSelect<true>;
+    'mail-outbox': MailOutboxSelect<false> | MailOutboxSelect<true>;
+    'email-templates': EmailTemplatesSelect<false> | EmailTemplatesSelect<true>;
+    emails: EmailsSelect<false> | EmailsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
+    'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
@@ -109,7 +117,13 @@ export interface Config {
   };
   user: User;
   jobs: {
-    tasks: unknown;
+    tasks: {
+      'process-email': TaskProcessEmail;
+      inline: {
+        input: unknown;
+        output: unknown;
+      };
+    };
     workflows: unknown;
   };
 }
@@ -142,6 +156,10 @@ export interface User {
   membershipPlan?: (number | null) | MembershipPlan;
   membershipStatus?: ('none' | 'pending' | 'active' | 'cancelled') | null;
   membershipRenewsAt?: string | null;
+  /**
+   * Receives the monthly studio newsletter.
+   */
+  newsletter?: boolean | null;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -306,6 +324,300 @@ export interface Booking {
   createdAt: string;
 }
 /**
+ * Mail captured by the development transport instead of being sent. Empty when SMTP is configured.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "mail-outbox".
+ */
+export interface MailOutbox {
+  id: number;
+  subject: string;
+  to: string[];
+  cc?: string[] | null;
+  from?: string | null;
+  html?: string | null;
+  text?: string | null;
+  headers?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "email-templates".
+ */
+export interface EmailTemplate {
+  id: number;
+  /**
+   * A descriptive name for this email template
+   */
+  name: string;
+  /**
+   * Unique identifier for this template (e.g., "welcome-email", "password-reset")
+   */
+  slug: string;
+  /**
+   * Email subject line. You can use Liquid variables like {{ firstName }} or {{ siteName }}.
+   */
+  subject: string;
+  /**
+   * Email content with rich text formatting. Supports Liquid variables like {{ firstName }} and filters like {{ createdAt | formatDate: "long" }}. Content is converted to HTML and plain text automatically. Set templateEngine to "mustache" or "simple" in the plugin config for alternative syntaxes.
+   */
+  content: {
+    root: {
+      type: string;
+      children: {
+        type: any;
+        version: number;
+        [k: string]: unknown;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  };
+  /**
+   * Declare the variables this template expects. Variables marked Required must be supplied with a non-empty value when sending, otherwise the send is rejected before any email is queued. Leave empty to accept any variables.
+   */
+  variables?:
+    | {
+        /**
+         * Variable name as referenced in the template, e.g. firstName (without the {{ }}).
+         */
+        name: string;
+        /**
+         * Reject sends that omit this variable or pass an empty value.
+         */
+        required?: boolean | null;
+        /**
+         * Optional note describing what this variable is for.
+         */
+        description?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Reusable layout to wrap this template body in. The rendered content is injected into the layout's {{ content }} slot. Choose "None" to send the body without a layout. When left at "Use default", the plugin's defaultLayout (if configured) is applied.
+   */
+  layout?: ('default' | 'none' | 'kiln') | null;
+  /**
+   * Sample variables used to render the live preview below (e.g. {"firstName": "Ada"}). Only used for previewing — not stored on sent emails.
+   */
+  sampleVariables?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Email delivery and status tracking
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "emails".
+ */
+export interface Email {
+  id: number;
+  /**
+   * Email template used (optional if custom content provided)
+   */
+  template?: (number | null) | EmailTemplate;
+  /**
+   * Slug of the email template (auto-populated from template relationship)
+   */
+  templateSlug?: string | null;
+  /**
+   * Recipient email addresses
+   */
+  to: string[];
+  /**
+   * CC email addresses
+   */
+  cc?: string[] | null;
+  /**
+   * BCC email addresses
+   */
+  bcc?: string[] | null;
+  /**
+   * Sender email address (optional, uses default if not provided)
+   */
+  from?: string | null;
+  /**
+   * Sender display name (optional, e.g., "John Doe" for "John Doe <john@example.com>")
+   */
+  fromName?: string | null;
+  /**
+   * Reply-to email address
+   */
+  replyTo?: string | null;
+  /**
+   * Email subject line
+   */
+  subject: string;
+  /**
+   * Rendered HTML content of the email
+   */
+  html: string;
+  /**
+   * Plain text version of the email
+   */
+  text?: string | null;
+  /**
+   * Template variables used to render this email
+   */
+  variables?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * When this email should be sent (leave empty for immediate)
+   */
+  scheduledAt?: string | null;
+  /**
+   * When this email was actually sent
+   */
+  sentAt?: string | null;
+  /**
+   * Current status of this email
+   */
+  status: 'pending' | 'processing' | 'sent' | 'failed';
+  /**
+   * Number of send attempts made
+   */
+  attempts?: number | null;
+  /**
+   * When the last send attempt was made
+   */
+  lastAttemptAt?: string | null;
+  /**
+   * Last error message if send failed
+   */
+  error?: string | null;
+  /**
+   * Email priority (1=highest, 10=lowest)
+   */
+  priority?: number | null;
+  /**
+   * Processing jobs associated with this email
+   */
+  jobs?: (number | PayloadJob)[] | null;
+  booking?: (number | null) | Booking;
+  recipient?: (number | null) | User;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs".
+ */
+export interface PayloadJob {
+  id: number;
+  /**
+   * Input data provided to the job
+   */
+  input?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  taskStatus?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  completedAt?: string | null;
+  totalTried?: number | null;
+  /**
+   * If hasError is true this job will not be retried
+   */
+  hasError?: boolean | null;
+  /**
+   * If hasError is true, this is the error that caused it
+   */
+  error?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Task execution log
+   */
+  log?:
+    | {
+        executedAt: string;
+        completedAt: string;
+        taskSlug: 'inline' | 'process-email';
+        taskID: string;
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        state: 'failed' | 'succeeded';
+        error?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  taskSlug?: ('inline' | 'process-email') | null;
+  queue?: string | null;
+  waitUntil?: string | null;
+  processing?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
@@ -352,6 +664,18 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'membership-plans';
         value: number | MembershipPlan;
+      } | null)
+    | ({
+        relationTo: 'mail-outbox';
+        value: number | MailOutbox;
+      } | null)
+    | ({
+        relationTo: 'email-templates';
+        value: number | EmailTemplate;
+      } | null)
+    | ({
+        relationTo: 'emails';
+        value: number | Email;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -405,6 +729,7 @@ export interface UsersSelect<T extends boolean = true> {
   membershipPlan?: T;
   membershipStatus?: T;
   membershipRenewsAt?: T;
+  newsletter?: T;
   updatedAt?: T;
   createdAt?: T;
   email?: T;
@@ -513,11 +838,109 @@ export interface MembershipPlansSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "mail-outbox_select".
+ */
+export interface MailOutboxSelect<T extends boolean = true> {
+  subject?: T;
+  to?: T;
+  cc?: T;
+  from?: T;
+  html?: T;
+  text?: T;
+  headers?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "email-templates_select".
+ */
+export interface EmailTemplatesSelect<T extends boolean = true> {
+  name?: T;
+  slug?: T;
+  subject?: T;
+  content?: T;
+  variables?:
+    | T
+    | {
+        name?: T;
+        required?: T;
+        description?: T;
+        id?: T;
+      };
+  layout?: T;
+  sampleVariables?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "emails_select".
+ */
+export interface EmailsSelect<T extends boolean = true> {
+  template?: T;
+  templateSlug?: T;
+  to?: T;
+  cc?: T;
+  bcc?: T;
+  from?: T;
+  fromName?: T;
+  replyTo?: T;
+  subject?: T;
+  html?: T;
+  text?: T;
+  variables?: T;
+  scheduledAt?: T;
+  sentAt?: T;
+  status?: T;
+  attempts?: T;
+  lastAttemptAt?: T;
+  error?: T;
+  priority?: T;
+  jobs?: T;
+  booking?: T;
+  recipient?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
   key?: T;
   data?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs_select".
+ */
+export interface PayloadJobsSelect<T extends boolean = true> {
+  input?: T;
+  taskStatus?: T;
+  completedAt?: T;
+  totalTried?: T;
+  hasError?: T;
+  error?: T;
+  log?:
+    | T
+    | {
+        executedAt?: T;
+        completedAt?: T;
+        taskSlug?: T;
+        taskID?: T;
+        input?: T;
+        output?: T;
+        state?: T;
+        error?: T;
+        id?: T;
+      };
+  taskSlug?: T;
+  queue?: T;
+  waitUntil?: T;
+  processing?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -725,6 +1148,23 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskProcess-email".
+ */
+export interface TaskProcessEmail {
+  input: {
+    /**
+     * The ID of the email to process and send
+     */
+    emailId: string;
+  };
+  output: {
+    success?: boolean | null;
+    emailId?: string | null;
+    status?: string | null;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

@@ -1,16 +1,283 @@
 import type { Payload } from 'payload'
 
+import {
+  scheduleClassReminder,
+  scheduleNewsletter,
+  sendBookingConfirmation,
+  sendWelcomeEmail,
+  siteUrl,
+  TEMPLATES,
+} from '@/lib/mailing'
+import { MAIL_OUTBOX_SLUG } from '@/lib/mailOutbox'
+import type { EmailTemplate, Workshop } from '@/payload-types'
+
 import type { SeedContext } from './types'
 
-/**
- * Seed data for the Mailing integration. Phase 2 owns this file.
+/*
+ * Lexical builders for email templates. Unlike src/lib/richtext.ts they support inline bold
+ * text and links, which the templates need. `{{ }}` and `{% %}` inside text are LiquidJS tags
+ * that payload-mailing renders at send time.
  *
- * Runs after the core seed (see ./index.ts), so `ctx` holds the seeded users, workshops,
- * sessions and bookings. It must be safe on an empty database and must clean up its own
- * collections when `reset` is true.
+ * Links are site-relative (`/account`): Lexical percent-encodes a link URL it doesn't recognise,
+ * so `{{ siteUrl }}/account` can't be stored. The plugin's beforeSend hook in
+ * src/plugins/mailing.ts makes them absolute when the email goes out.
+ */
+type Inline =
+  string | { b: string } | { a: string; href: string } | { a: string; workshop: Workshop }
+type Block = Inline | Inline[] | { h: string } | { ul: Inline[] } | { quote: string }
+
+const base = { format: '' as const, indent: 0, version: 1, direction: 'ltr' as const }
+
+const textNode = (text: string, format = 0) => ({
+  type: 'text',
+  text,
+  format,
+  style: '',
+  mode: 'normal',
+  detail: 0,
+  version: 1,
+})
+
+const inline = (item: Inline) => {
+  if (typeof item === 'string') return textNode(item)
+  if ('b' in item) return textNode(item.b, 1)
+  const fields =
+    'href' in item
+      ? { linkType: 'custom', url: item.href, newTab: false }
+      : {
+          linkType: 'internal',
+          doc: { relationTo: 'workshops', value: item.workshop.id },
+          newTab: false,
+        }
+  return { ...base, type: 'link', fields, children: [textNode(item.a)] }
+}
+
+const block = (b: Block) => {
+  if (typeof b === 'object' && !Array.isArray(b)) {
+    if ('h' in b) return { ...base, type: 'heading', tag: 'h2', children: [textNode(b.h)] }
+    if ('ul' in b) {
+      return {
+        ...base,
+        type: 'list',
+        listType: 'bullet',
+        tag: 'ul',
+        start: 1,
+        children: b.ul.map((item, i) => ({
+          ...base,
+          type: 'listitem',
+          value: i + 1,
+          children: [inline(item)],
+        })),
+      }
+    }
+    if ('quote' in b) return { ...base, type: 'quote', children: [textNode(b.quote)] }
+  }
+  const parts = Array.isArray(b) ? b : [b]
+  return { ...base, type: 'paragraph', textFormat: 0, textStyle: '', children: parts.map(inline) }
+}
+
+const doc = (...blocks: Block[]): EmailTemplate['content'] => ({
+  root: { ...base, type: 'root', children: blocks.map(block) },
+})
+
+const required = (...names: string[]) => names.map((name) => ({ name, required: true }))
+
+const sampleBooking = {
+  siteUrl: 'http://localhost:3000',
+  preheader: 'Your seat in Wheel Throwing for Beginners is reserved.',
+  firstName: 'Mara',
+  workshopTitle: 'Wheel Throwing for Beginners',
+  instructor: 'Ilse Bakker',
+  startsAt: '2026-12-04T17:00:00.000Z',
+  sessionDate: 'Friday 4 December',
+  sessionTime: '18:00',
+  duration: '2 h 30 min',
+  reference: 'KC-DEMO42',
+  amount: 65,
+  paid: false,
+}
+
+/** The five templates. Editors can change all of them under Mailing → Email Templates. */
+const templates = (featured: Workshop | undefined) => [
+  {
+    name: 'Booking confirmation',
+    slug: TEMPLATES.bookingConfirmation,
+    subject: 'Booked: {{ workshopTitle }} on {{ sessionDate }} ({{ reference }})',
+    content: doc(
+      { h: 'See you at the wheel, {{ firstName }}' },
+      ['Thanks for booking ', { b: '{{ workshopTitle }}' }, '. Your seat is held for you.'],
+      {
+        ul: [
+          'When: {{ sessionDate }} at {{ sessionTime }} ({{ duration }})',
+          'Teacher: {{ instructor }}',
+          'Price: {{ amount | formatCurrency }}',
+          'Booking reference: {{ reference }}',
+        ],
+      },
+      '{% if paid %}Your payment is in, so there is nothing left to do.{% else %}Your booking is waiting for payment. You can pay from My studio.{% endif %}',
+      [{ a: 'View your booking in My studio', href: '/account' }],
+      'Wear clothes that can take a little clay. Aprons, tools and tea are on us.',
+    ),
+    variables: required('firstName', 'workshopTitle', 'sessionDate', 'sessionTime', 'reference'),
+    sampleVariables: sampleBooking,
+  },
+  {
+    name: 'Class reminder (24 hours before)',
+    slug: TEMPLATES.classReminder,
+    subject: 'Tomorrow: {{ workshopTitle }} at {{ sessionTime }}',
+    content: doc(
+      { h: 'Tomorrow is clay day, {{ firstName }}' },
+      [
+        'A friendly reminder that ',
+        { b: '{{ workshopTitle }}' },
+        ' starts tomorrow, {{ sessionDate }}, at {{ sessionTime }}.',
+      ],
+      {
+        ul: [
+          'Arrive ten minutes early for tea and an apron',
+          'Short nails and clothes you can get muddy',
+          'Booking reference: {{ reference }}',
+        ],
+      },
+      {
+        quote:
+          'Can’t make it after all? Let us know, and we’ll offer your seat to the waiting list.',
+      },
+      [{ a: 'See your booking', href: '/account' }],
+    ),
+    variables: required('firstName', 'workshopTitle', 'sessionDate', 'sessionTime'),
+    sampleVariables: { ...sampleBooking, preheader: 'See you tomorrow at Wheel Throwing.' },
+  },
+  {
+    name: 'Welcome email',
+    slug: TEMPLATES.welcome,
+    subject: 'Welcome to Kiln & Co., {{ firstName }}',
+    content: doc(
+      { h: 'Welcome to the studio, {{ firstName }}' },
+      'We are a small ceramics studio by the sea, and we are glad you found us. Here is how most people start:',
+      {
+        ul: [
+          'Book a one-off evening class to feel the clay for the first time',
+          'Join a course to learn throwing, trimming and glazing properly',
+          'Become a member for open-studio time, clay and firings',
+        ],
+      },
+      [
+        { a: 'Browse workshops', href: '/workshops' },
+        ' or ',
+        { a: 'see membership plans', href: '/membership' },
+        '.',
+      ],
+    ),
+    variables: required('firstName'),
+    sampleVariables: {
+      siteUrl: 'http://localhost:3000',
+      preheader: 'Welcome to the studio.',
+      firstName: 'Mara',
+    },
+  },
+  {
+    name: 'Studio newsletter',
+    slug: TEMPLATES.newsletter,
+    subject: 'Studio notes for {{ issueDate | formatDate: "long" }}',
+    content: doc(
+      { h: 'Studio notes, {{ firstName }}' },
+      'Winter is our favourite season in the studio: the kiln keeps the room warm and the light off the sea is soft and low.',
+      { h: 'New on the glaze shelf' },
+      'We mixed two new house glazes this month: a deep celadon called Breakwater and a speckled oatmeal called Dune. Members can test them on any bisque piece.',
+      { h: 'Classes with seats left' },
+      featured
+        ? [
+            'Our most-loved evening class still has seats: ',
+            { a: featured.title, workshop: featured },
+            '.',
+          ]
+        : 'Several evening classes still have seats this month.',
+      [{ a: 'See all workshops', href: '/workshops' }],
+      { quote: 'Open studio is now also on Sunday mornings, 10:00 to 13:00.' },
+      [
+        'You get this newsletter because you subscribed in My studio. ',
+        { a: 'Unsubscribe or change settings', href: '/account#settings' },
+        '.',
+      ],
+    ),
+    variables: required('firstName', 'issueDate'),
+    sampleVariables: {
+      siteUrl: 'http://localhost:3000',
+      preheader: 'News from the studio.',
+      firstName: 'Mara',
+      issueDate: '2026-12-01T08:00:00.000Z',
+    },
+  },
+  {
+    name: 'Newsletter subscription confirmed',
+    slug: TEMPLATES.newsletterSubscribed,
+    subject: 'You’re on the list, {{ firstName }}',
+    content: doc(
+      { h: 'You’re on the list' },
+      'Thanks, {{ firstName }}. Once a month we’ll send you studio notes: new classes, glazes and open-studio hours.',
+      '{% if nextIssue != "" %}The next issue goes out on {{ nextIssue | formatDate: "long" }}.{% endif %}',
+      [{ a: 'Change your email settings', href: '/account#settings' }],
+    ),
+    variables: required('firstName'),
+    sampleVariables: {
+      siteUrl: 'http://localhost:3000',
+      preheader: 'You are on the list.',
+      firstName: 'Mara',
+      nextIssue: '2026-12-01T08:00:00.000Z',
+    },
+  },
+]
+
+/** 09:00 studio time (08:00 UTC in winter) on the first day of next month. */
+export const nextNewsletterDate = (now = new Date()): Date =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 8, 0, 0))
+
+/**
+ * Seeds the mailing integration: the five templates, a welcome email for each member and a
+ * confirmation for each seeded booking (sent immediately, so the outbox has something to show),
+ * class reminders scheduled 24 hours before each session, and next month's newsletter scheduled
+ * for the subscribers (Mara subscribes, Jonas doesn't).
  */
 export const seedMailing = async (
-  _payload: Payload,
-  _ctx: SeedContext,
-  _options: { reset: boolean },
-): Promise<void> => {}
+  payload: Payload,
+  ctx: SeedContext,
+  { reset }: { reset: boolean },
+): Promise<void> => {
+  if (reset) {
+    for (const collection of [MAIL_OUTBOX_SLUG, 'emails', 'email-templates'] as const) {
+      await payload.delete({ collection, where: { id: { exists: true } }, overrideAccess: true })
+    }
+    await payload.delete({
+      collection: 'payload-jobs',
+      where: { taskSlug: { equals: 'process-email' } },
+      overrideAccess: true,
+    })
+  }
+
+  const featured = ctx.workshops.find((w) => w.featured) ?? ctx.workshops[0]
+  for (const template of templates(featured)) {
+    await payload.create({ collection: 'email-templates', data: template, overrideAccess: true })
+  }
+
+  const [mara] = ctx.members
+  if (mara) {
+    // skipMail: the subscription confirmation is a member action, not part of the demo data.
+    await payload.update({
+      collection: 'users',
+      id: mara.id,
+      data: { newsletter: true },
+      context: { skipMail: true },
+    })
+  }
+
+  for (const member of ctx.members) {
+    await sendWelcomeEmail(payload, member, { processImmediately: true })
+  }
+  for (const booking of ctx.bookings) {
+    await sendBookingConfirmation(payload, booking, { processImmediately: true })
+    await scheduleClassReminder(payload, booking)
+  }
+  await scheduleNewsletter(payload, nextNewsletterDate())
+  payload.logger.info(`Mailing seeded (links point at ${siteUrl()}).`)
+}
