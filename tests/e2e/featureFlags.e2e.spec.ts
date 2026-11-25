@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { USERS } from '../helpers/e2e'
+import { registerMember, USERS } from '../helpers/e2e'
 
 /**
  * End-to-end tests for the @xtr-dev/payload-feature-flags integration.
@@ -21,10 +21,14 @@ const adminApi = async (request: APIRequestContext) => {
   return request
 }
 
-const setFlag = async (request: APIRequestContext, name: string, enabled: boolean) => {
+const setFlag = async (
+  request: APIRequestContext,
+  name: string,
+  data: { enabled?: boolean; rolloutPercentage?: number },
+) => {
   const found = await request.get(`/api/feature-flags?where[name][equals]=${name}&limit=1`)
   const { docs } = (await found.json()) as { docs: Array<{ id: number }> }
-  const res = await request.patch(`/api/feature-flags/${docs[0].id}`, { data: { enabled } })
+  const res = await request.patch(`/api/feature-flags/${docs[0].id}`, { data })
   expect(res.ok()).toBe(true)
 }
 
@@ -110,19 +114,53 @@ test.describe('FeatureFlags (payload-feature-flags)', () => {
         await page.goto('/gift-cards')
         await expect(page.getByRole('heading', { level: 1 })).toContainText('Give someone')
 
-        await setFlag(api, 'gift-cards', false)
+        await setFlag(api, 'gift-cards', { enabled: false })
         await page.goto('/')
         await expect(nav.getByRole('link', { name: 'Gift cards' })).toHaveCount(0)
         const res = await page.goto('/gift-cards')
         expect(res?.status()).toBe(404)
 
-        await setFlag(api, 'gift-cards', true)
+        await setFlag(api, 'gift-cards', { enabled: true })
         await page.goto('/')
         await expect(nav.getByRole('link', { name: 'Gift cards' })).toBeVisible()
       } finally {
-        await setFlag(api, 'gift-cards', true)
+        await setFlag(api, 'gift-cards', { enabled: true })
         await api.dispose()
       }
     })
+  })
+
+  test('rolls BookingFlowV2 out and hands over to billing checkout', async ({
+    page,
+    playwright,
+    baseURL,
+  }) => {
+    const api = await adminApi(await playwright.request.newContext({ baseURL }))
+    try {
+      // Roll out to everyone, so the new member is certainly in the rollout.
+      await setFlag(api, 'new-booking-flow', { rolloutPercentage: 100 })
+      await registerMember(page, 'Fenna Flags')
+      await page.goto('/workshops/hand-building-pinch-coil-slab')
+      await page
+        .getByTestId('session')
+        .first()
+        .getByRole('link', { name: /^Book / })
+        .click()
+      const flow = page.locator('[data-booking-flow]')
+      await expect(flow).toHaveAttribute('data-booking-flow', 'v2')
+      await flow.getByLabel('I throw regularly').check()
+      await flow.getByLabel(/Anything we should know/).fill('Left-handed')
+      await expect(page.getByTestId('booking-summary')).toContainText(
+        'Experience: I throw regularly.',
+      )
+      await page.getByRole('button', { name: /^Reserve seat/ }).click()
+      await page.waitForURL(/\/api\/payload-billing\/test\/payment\//)
+
+      await page.goto('/account')
+      await expect(page.getByTestId('bookings')).toContainText('Awaiting payment')
+    } finally {
+      await setFlag(api, 'new-booking-flow', { rolloutPercentage: 50 })
+      await api.dispose()
+    }
   })
 })
