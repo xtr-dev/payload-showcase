@@ -1,0 +1,56 @@
+/*
+ * Kiln & Co. design tokens: the single source of truth for colour, type, radius and shadow.
+ * Tailwind v4 turns every token below into utilities (bg-clay, text-ink-soft, font-display, ...).
+ *
+ * Contrast (WCAG 2.x, on --color-paper unless noted; all pass AA for body text):
+ *   ink 14.7:1 · ink-soft 8.1:1 · clay 5.4:1 · glaze 6.9:1 · white on clay 5.9:1 ·
+ *   white on glaze 7.4:1 · ochre on ink 7.1:1 · clay-deep on clay-soft for tinted badges.
+ *   Ochre and sand are decorative on light backgrounds: never use them for text there.
+ */
+@theme {
+  /* Surfaces */
+  --color-paper: #faf5ec; /* page background: unbleached paper */
+  --color-bisque: #f1e6d6; /* alternate sections: bisque-fired clay */
+  --color-sand: #e5d3b9; /* subtle fills, image placeholders */
+  --color-line: #d8c4a8; /* borders and rules */
+
+  /* Text */
+  --color-ink: #2b1f18; /* primary text, dark sections */
+  --color-ink-soft: #5b4637; /* secondary text */
+
+  /* Brand */
+  --color-clay: #a8461f; /* primary actions and links: terracotta */
+  --color-clay-deep: #86350f; /* hover/active for clay */
+  --color-clay-soft: #f5dccb; /* tinted backgrounds */
+  --color-glaze: #2f5d57; /* secondary: deep celadon glaze */
+  --color-glaze-deep: #224742;
+  --color-glaze-soft: #dbe8e2;
+  --color-ochre: #d9a441; /* decorative accent: iron-yellow glaze */
+  --color-cobalt: #2c4a7a; /* focus rings and info */
+
+  /* Status */
+  --color-success: #2f6b3f;
+  --color-success-soft: #dcebdc;
+  --color-warning: #8a5a00;
+  --color-warning-soft: #f7e7c4;
+  --color-danger: #9b2c1f;
+  --color-danger-soft: #f6dad5;
+
+  /* Shape */
+  --radius-card: 1.25rem;
+  --radius-pill: 999px;
+  --radius-arch: 999px 999px 1.25rem 1.25rem; /* kiln-door arch used for image frames */
+
+  /* Depth */
+  --shadow-card: 0 1px 0 rgb(43 31 24 / 0.04), 0 8px 24px -12px rgb(43 31 24 / 0.18);
+  --shadow-lift: 0 2px 0 rgb(43 31 24 / 0.06), 0 18px 40px -18px rgb(43 31 24 / 0.35);
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Font families are provided by next/font as CSS variables on <html> (see layout.tsx). */
+@theme inline {
+  --font-display: var(--font-fraunces), 'Iowan Old Style', Georgia, serif;
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+}
