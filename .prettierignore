@@ -1,0 +1,8 @@
+.next
+.e2e
+media
+pnpm-lock.yaml
+src/payload-types.ts
+src/app/(payload)
+playwright-report
+test-results
