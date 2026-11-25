@@ -73,7 +73,11 @@ export interface Config {
     sessions: Session;
     bookings: Booking;
     'membership-plans': MembershipPlan;
+    payments: Payment;
+    invoices: Invoice;
+    refunds: Refund;
     'payload-kv': PayloadKv;
+    'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
     'payload-migrations': PayloadMigration;
@@ -86,7 +90,11 @@ export interface Config {
     sessions: SessionsSelect<false> | SessionsSelect<true>;
     bookings: BookingsSelect<false> | BookingsSelect<true>;
     'membership-plans': MembershipPlansSelect<false> | MembershipPlansSelect<true>;
+    payments: PaymentsSelect<false> | PaymentsSelect<true>;
+    invoices: InvoicesSelect<false> | InvoicesSelect<true>;
+    refunds: RefundsSelect<false> | RefundsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
+    'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
@@ -98,10 +106,12 @@ export interface Config {
   globals: {
     home: Home;
     'site-settings': SiteSetting;
+    'payload-jobs-stats': PayloadJobsStat;
   };
   globalsSelect: {
     home: HomeSelect<false> | HomeSelect<true>;
     'site-settings': SiteSettingsSelect<false> | SiteSettingsSelect<true>;
+    'payload-jobs-stats': PayloadJobsStatsSelect<false> | PayloadJobsStatsSelect<true>;
   };
   locale: null;
   widgets: {
@@ -109,7 +119,13 @@ export interface Config {
   };
   user: User;
   jobs: {
-    tasks: unknown;
+    tasks: {
+      billingRefundSweep: TaskBillingRefundSweep;
+      inline: {
+        input: unknown;
+        output: unknown;
+      };
+    };
     workflows: unknown;
   };
 }
@@ -302,6 +318,272 @@ export interface Booking {
    * Anything the studio should know (allergies, accessibility needs).
    */
   notes?: string | null;
+  /**
+   * The latest payment for this booking (set by checkout).
+   */
+  payment?: (number | null) | Payment;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payments".
+ */
+export interface Payment {
+  id: number;
+  provider: 'stripe' | 'mollie' | 'test';
+  /**
+   * The payment ID from the payment provider
+   */
+  providerId?: string | null;
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled' | 'refunded' | 'partially_refunded';
+  /**
+   * Amount in cents (e.g., 2000 = $20.00)
+   */
+  amount: number;
+  /**
+   * ISO 4217 currency code (e.g., USD, EUR)
+   */
+  currency: string;
+  /**
+   * Payment description
+   */
+  description?: string | null;
+  /**
+   * Checkout URL where user can complete payment (if applicable)
+   */
+  checkoutUrl?: string | null;
+  /**
+   * URL to redirect user after payment completion. {returnToken} is replaced with this payment's return token.
+   */
+  redirectUrl?: string | null;
+  /**
+   * Random token set by the plugin on create. Put {returnToken} in the redirect URL to get it back on your return page, then find the payment by it.
+   */
+  returnToken?: string | null;
+  invoice?: (number | null) | Invoice;
+  /**
+   * Additional metadata for the payment
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Raw data from the payment provider
+   */
+  providerData?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  refunds?: (number | Refund)[] | null;
+  version?: number | null;
+  /**
+   * The member who pays.
+   */
+  member?: (number | null) | User;
+  /**
+   * The workshop booking this payment is for.
+   */
+  booking?: (number | null) | Booking;
+  /**
+   * The membership this payment is for.
+   */
+  membershipPlan?: (number | null) | MembershipPlan;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoices".
+ */
+export interface Invoice {
+  id: number;
+  /**
+   * Invoice number (auto-generated as INV-<unix-ms-timestamp>, e.g. INV-1755289904123, unless set explicitly)
+   */
+  number?: string | null;
+  /**
+   * Link to customer record (optional)
+   */
+  customer?: (number | null) | User;
+  /**
+   * Customer billing information (auto-populated from customer relationship)
+   */
+  customerInfo?: {
+    /**
+     * Customer name
+     */
+    name?: string | null;
+    /**
+     * Customer email address
+     */
+    email?: string | null;
+    /**
+     * Customer phone number
+     */
+    phone?: string | null;
+    /**
+     * Company name (optional)
+     */
+    company?: string | null;
+    /**
+     * Tax ID or VAT number
+     */
+    taxId?: string | null;
+  };
+  /**
+   * Billing address (auto-populated from customer relationship)
+   */
+  billingAddress?: {
+    /**
+     * Address line 1
+     */
+    line1?: string | null;
+    /**
+     * Address line 2
+     */
+    line2?: string | null;
+    city?: string | null;
+    /**
+     * State or province
+     */
+    state?: string | null;
+    /**
+     * Postal or ZIP code
+     */
+    postalCode?: string | null;
+    /**
+     * Country code (e.g., US, GB)
+     */
+    country?: string | null;
+  };
+  status: 'draft' | 'open' | 'paid' | 'void' | 'uncollectible';
+  /**
+   * ISO 4217 currency code (e.g., USD, EUR)
+   */
+  currency: string;
+  items: {
+    description: string;
+    quantity: number;
+    /**
+     * Amount in cents
+     */
+    unitAmount: number;
+    /**
+     * Calculated: quantity × unitAmount
+     */
+    totalAmount?: number | null;
+    id?: string | null;
+  }[];
+  /**
+   * Sum of all line items
+   */
+  subtotal?: number | null;
+  /**
+   * Tax amount in cents
+   */
+  taxAmount?: number | null;
+  /**
+   * Total amount (subtotal + tax)
+   */
+  amount?: number | null;
+  dueDate?: string | null;
+  paidAt?: string | null;
+  payment?: (number | null) | Payment;
+  /**
+   * Internal notes
+   */
+  notes?: string | null;
+  /**
+   * Additional invoice metadata
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "refunds".
+ */
+export interface Refund {
+  id: number;
+  /**
+   * The refund ID from the payment provider. Filled in when the provider accepts the refund; supply it to record a refund made elsewhere.
+   */
+  providerId?: string | null;
+  /**
+   * Keep this refund as a record only: it is never sent to the payment provider or polled. Use it for refunds handled by hand, or to hold one back; untick it to let the refund sweep send it.
+   */
+  manual?: boolean | null;
+  /**
+   * Sent to the provider so retrying this refund can never pay out twice
+   */
+  idempotencyKey?: string | null;
+  /**
+   * Why the provider failed or canceled the refund
+   */
+  failureReason?: string | null;
+  payment: number | Payment;
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled';
+  /**
+   * Refund amount in cents
+   */
+  amount: number;
+  /**
+   * ISO 4217 currency code (e.g., USD, EUR)
+   */
+  currency: string;
+  /**
+   * Reason for the refund
+   */
+  reason?: ('duplicate' | 'fraudulent' | 'requested_by_customer' | 'other') | null;
+  /**
+   * Additional details about the refund
+   */
+  description?: string | null;
+  /**
+   * Additional refund metadata
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Raw data from the payment provider
+   */
+  providerData?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -321,6 +603,107 @@ export interface PayloadKv {
     | number
     | boolean
     | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs".
+ */
+export interface PayloadJob {
+  id: number;
+  /**
+   * Input data provided to the job
+   */
+  input?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  taskStatus?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  completedAt?: string | null;
+  totalTried?: number | null;
+  /**
+   * If hasError is true this job will not be retried
+   */
+  hasError?: boolean | null;
+  /**
+   * If hasError is true, this is the error that caused it
+   */
+  error?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Task execution log
+   */
+  log?:
+    | {
+        executedAt: string;
+        completedAt: string;
+        taskSlug: 'inline' | 'billingRefundSweep';
+        taskID: string;
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        state: 'failed' | 'succeeded';
+        error?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  taskSlug?: ('inline' | 'billingRefundSweep') | null;
+  queue?: string | null;
+  waitUntil?: string | null;
+  processing?: boolean | null;
+  meta?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -352,6 +735,18 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'membership-plans';
         value: number | MembershipPlan;
+      } | null)
+    | ({
+        relationTo: 'payments';
+        value: number | Payment;
+      } | null)
+    | ({
+        relationTo: 'invoices';
+        value: number | Invoice;
+      } | null)
+    | ({
+        relationTo: 'refunds';
+        value: number | Refund;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -489,6 +884,7 @@ export interface BookingsSelect<T extends boolean = true> {
   amount?: T;
   currency?: T;
   notes?: T;
+  payment?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -513,11 +909,136 @@ export interface MembershipPlansSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payments_select".
+ */
+export interface PaymentsSelect<T extends boolean = true> {
+  provider?: T;
+  providerId?: T;
+  status?: T;
+  amount?: T;
+  currency?: T;
+  description?: T;
+  checkoutUrl?: T;
+  redirectUrl?: T;
+  returnToken?: T;
+  invoice?: T;
+  metadata?: T;
+  providerData?: T;
+  refunds?: T;
+  version?: T;
+  member?: T;
+  booking?: T;
+  membershipPlan?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoices_select".
+ */
+export interface InvoicesSelect<T extends boolean = true> {
+  number?: T;
+  customer?: T;
+  customerInfo?:
+    | T
+    | {
+        name?: T;
+        email?: T;
+        phone?: T;
+        company?: T;
+        taxId?: T;
+      };
+  billingAddress?:
+    | T
+    | {
+        line1?: T;
+        line2?: T;
+        city?: T;
+        state?: T;
+        postalCode?: T;
+        country?: T;
+      };
+  status?: T;
+  currency?: T;
+  items?:
+    | T
+    | {
+        description?: T;
+        quantity?: T;
+        unitAmount?: T;
+        totalAmount?: T;
+        id?: T;
+      };
+  subtotal?: T;
+  taxAmount?: T;
+  amount?: T;
+  dueDate?: T;
+  paidAt?: T;
+  payment?: T;
+  notes?: T;
+  metadata?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "refunds_select".
+ */
+export interface RefundsSelect<T extends boolean = true> {
+  providerId?: T;
+  manual?: T;
+  idempotencyKey?: T;
+  failureReason?: T;
+  payment?: T;
+  status?: T;
+  amount?: T;
+  currency?: T;
+  reason?: T;
+  description?: T;
+  metadata?: T;
+  providerData?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
   key?: T;
   data?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs_select".
+ */
+export interface PayloadJobsSelect<T extends boolean = true> {
+  input?: T;
+  taskStatus?: T;
+  completedAt?: T;
+  totalTried?: T;
+  hasError?: T;
+  error?: T;
+  log?:
+    | T
+    | {
+        executedAt?: T;
+        completedAt?: T;
+        taskSlug?: T;
+        taskID?: T;
+        input?: T;
+        output?: T;
+        state?: T;
+        error?: T;
+        id?: T;
+      };
+  taskSlug?: T;
+  queue?: T;
+  waitUntil?: T;
+  processing?: T;
+  meta?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -640,6 +1161,24 @@ export interface SiteSetting {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs-stats".
+ */
+export interface PayloadJobsStat {
+  id: number;
+  stats?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "home_select".
  */
 export interface HomeSelect<T extends boolean = true> {
@@ -718,6 +1257,16 @@ export interface SiteSettingsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs-stats_select".
+ */
+export interface PayloadJobsStatsSelect<T extends boolean = true> {
+  stats?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "collections_widget".
  */
 export interface CollectionsWidget {
@@ -725,6 +1274,14 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskBillingRefundSweep".
+ */
+export interface TaskBillingRefundSweep {
+  input?: unknown;
+  output?: unknown;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
