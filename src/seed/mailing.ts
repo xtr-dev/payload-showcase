@@ -84,7 +84,7 @@ const required = (...names: string[]) => names.map((name) => ({ name, required: 
 
 const sampleBooking = {
   siteUrl: 'http://localhost:3000',
-  preheader: 'Your seat in Wheel Throwing for Beginners is reserved.',
+  preheader: 'Your seat in Wheel Throwing for Beginners is confirmed.',
   firstName: 'Mara',
   workshopTitle: 'Wheel Throwing for Beginners',
   instructor: 'Ilse Bakker',
@@ -94,7 +94,7 @@ const sampleBooking = {
   duration: '2 h 30 min',
   reference: 'KC-DEMO42',
   amount: 65,
-  paid: false,
+  paid: true,
 }
 
 /** The five templates. Editors can change all of them under Mailing → Email Templates. */
@@ -105,7 +105,7 @@ const templates = (featured: Workshop | undefined) => [
     subject: 'Booked: {{ workshopTitle }} on {{ sessionDate }} ({{ reference }})',
     content: doc(
       { h: 'See you at the wheel, {{ firstName }}' },
-      ['Thanks for booking ', { b: '{{ workshopTitle }}' }, '. Your seat is held for you.'],
+      ['Thanks for booking ', { b: '{{ workshopTitle }}' }, '. Your seat is confirmed.'],
       {
         ul: [
           'When: {{ sessionDate }} at {{ sessionTime }} ({{ duration }})',
@@ -235,7 +235,7 @@ export const nextNewsletterDate = (now = new Date()): Date =>
 
 /**
  * Seeds the mailing integration: the five templates, a welcome email for each member and a
- * confirmation for each seeded booking (sent immediately, so the outbox has something to show),
+ * confirmation for each paid seeded booking (sent immediately, so the outbox has something to show),
  * class reminders scheduled 24 hours before each session, and next month's newsletter scheduled
  * for the subscribers (Mara subscribes, Jonas doesn't).
  */
@@ -274,7 +274,18 @@ export const seedMailing = async (
   for (const member of ctx.members) {
     await sendWelcomeEmail(payload, member, { processImmediately: true })
   }
-  for (const booking of ctx.bookings) {
+  // Only paid bookings are confirmed. Statuses are read fresh: the billing seed runs first.
+  const { docs: paid } = await payload.find({
+    collection: 'bookings',
+    where: {
+      id: { in: ctx.bookings.map((b) => b.id) },
+      status: { equals: 'paid' },
+    },
+    depth: 0,
+    limit: 0,
+    overrideAccess: true,
+  })
+  for (const booking of paid) {
     await sendBookingConfirmation(payload, booking, { processImmediately: true })
     await scheduleClassReminder(payload, booking)
   }

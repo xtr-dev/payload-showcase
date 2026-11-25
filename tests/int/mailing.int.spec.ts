@@ -3,6 +3,7 @@ import type { Payload, Where } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { MAIL_QUEUES, REMINDER_LEAD_MS, setNewsletterSubscription, TEMPLATES } from '@/lib/mailing'
+import { beginBookingCheckout } from '@/lib/checkout'
 import { MAIL_OUTBOX_SLUG } from '@/lib/mailOutbox'
 import type { Email, Session, User } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
@@ -148,7 +149,7 @@ describe('booking emails', () => {
   let session: Session
   let bookingId: number
 
-  it('sends a confirmation through the priority queue when a booking is made', async () => {
+  it('sends no confirmation while a booking waits for payment', async () => {
     const booked = new Set(
       ctx.bookings.filter((b) => relId(b.member) === jonas.id).map((b) => relId(b.session)),
     )
@@ -168,11 +169,28 @@ describe('booking emails', () => {
       overrideAccess: false,
     })
     bookingId = booking.id
+    await beginBookingCheckout({ payload, booking, user: jonas })
 
-    const [confirmation] = await emailsWhere({
+    expect(await emailsWhere({ booking: { equals: booking.id } })).toHaveLength(0)
+  })
+
+  it('sends a confirmation through the priority queue once the payment settles', async () => {
+    const { payment } = await payload.findByID({ collection: 'bookings', id: bookingId, depth: 0 })
+    expect(payment).toBeTruthy()
+    // What the payment provider's callback does: billing then marks the booking paid.
+    await payload.update({
+      collection: 'payments',
+      id: relId(payment) as number,
+      data: { status: 'succeeded' },
+    })
+    const booking = await payload.findByID({ collection: 'bookings', id: bookingId, depth: 0 })
+    expect(booking.status).toBe('paid')
+
+    const [confirmation, ...more] = await emailsWhere({
       booking: { equals: booking.id },
       templateSlug: { equals: TEMPLATES.bookingConfirmation },
     })
+    expect(more).toHaveLength(0)
     expect(confirmation).toMatchObject({ status: 'pending', to: [jonas.email], priority: 1 })
     expect(confirmation.subject).toContain(booking.reference)
 

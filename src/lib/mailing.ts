@@ -123,7 +123,7 @@ const bookingVariables = ({ booking, member, session, workshop }: BookingParts) 
 
 /**
  * Sends the booking confirmation for a booking, rendered from the `booking-confirmation`
- * template. The send goes to the `mail-priority` queue with priority 1, so it is delivered
+ * template. The bookings hook in src/plugins/mailing.ts calls it when a booking becomes `paid`. The send goes to the `mail-priority` queue with priority 1, so it is delivered
  * before newsletters and reminders. Returns the queued `emails` document.
  */
 export const sendBookingConfirmation = async (
@@ -136,7 +136,7 @@ export const sendBookingConfirmation = async (
     template: {
       slug: TEMPLATES.bookingConfirmation,
       variables: {
-        ...baseVariables(`Your seat in ${parts.workshop.title} is reserved.`),
+        ...baseVariables(`Your seat in ${parts.workshop.title} is confirmed.`),
         ...bookingVariables(parts),
       },
     },

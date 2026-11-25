@@ -56,7 +56,7 @@ export const MailingShowcase = async () => {
       features={[
         'Five Liquid templates with variables, filters and conditionals, wrapped in a shared Kiln & Co. layout',
         'Rich-text template editing in the admin panel, with a live preview from sample variables',
-        'Booking confirmations sent from site code with sendEmail, on their own priority queue',
+        'Booking confirmations sent from site code with sendEmail when payment settles, on their own priority queue',
         'Class reminders scheduled 24 hours before each session, and the newsletter scheduled for the 1st of the month',
         'Queued delivery through Payload jobs; processImmediately for the newsletter confirmation',
         'Newsletter opt-in and opt-out in My studio, honoured for issues that are already scheduled',

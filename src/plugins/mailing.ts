@@ -196,13 +196,28 @@ const hasTemplate = async (payload: Payload, slug: string): Promise<boolean> => 
   return totalDocs > 0
 }
 
+/** A booking is confirmed once: a later paid transition (e.g. after a refund) doesn't resend. */
+const hasConfirmation = async (payload: Payload, bookingId: number): Promise<boolean> => {
+  const { totalDocs } = await payload.count({
+    collection: 'emails',
+    where: {
+      booking: { equals: bookingId },
+      templateSlug: { equals: TEMPLATES.bookingConfirmation },
+    },
+    overrideAccess: true,
+  })
+  return totalDocs > 0
+}
+
 /** Set `context: { skipMail: true }` on a write to suppress the emails its hooks would send. */
 const skipMail = (context: Record<string, unknown>) => context.skipMail === true
 
 /**
- * Booking emails, sent by site code: a confirmation when a booking is made, a reminder
- * scheduled 24 hours before the session, and the reminder withdrawn when the booking is
- * cancelled or refunded. Mail problems are logged and never block the booking itself.
+ * Booking emails, sent by site code. A booking starts `pending` and billing moves it to `paid`
+ * once its payment settles (a free seat is marked paid straight away). On that transition the
+ * member gets the confirmation and a reminder is scheduled 24 hours before the session. When the
+ * booking is cancelled or refunded, the pending reminder is withdrawn. Mail problems are logged
+ * and never block the booking itself.
  */
 const bookingEmails: CollectionAfterChangeHook<Booking> = async ({
   doc,
@@ -212,15 +227,20 @@ const bookingEmails: CollectionAfterChangeHook<Booking> = async ({
 }) => {
   const { payload } = req
   if (skipMail(req.context)) return doc
+  const before = operation === 'create' ? undefined : previousDoc?.status
+  if (before === doc.status) return doc
   try {
-    if (operation === 'create' && (await hasTemplate(payload, TEMPLATES.bookingConfirmation))) {
+    if (
+      doc.status === 'paid' &&
+      (await hasTemplate(payload, TEMPLATES.bookingConfirmation)) &&
+      !(await hasConfirmation(payload, doc.id))
+    ) {
       await sendBookingConfirmation(payload, doc)
       if (await hasTemplate(payload, TEMPLATES.classReminder)) {
         await scheduleClassReminder(payload, doc)
       }
     }
-    const released = doc.status === 'cancelled' || doc.status === 'refunded'
-    if (operation === 'update' && released && previousDoc?.status !== doc.status) {
+    if (doc.status === 'cancelled' || doc.status === 'refunded') {
       await cancelPendingBookingEmails(payload, doc.id)
     }
   } catch (error) {
