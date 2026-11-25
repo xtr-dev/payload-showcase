@@ -1,6 +1,8 @@
 import type { Payload, PayloadRequest, Where } from 'payload'
 
-import type { Notification, User } from '@/payload-types'
+import type { Booking, Notification, User } from '@/payload-types'
+
+import { formatDate, formatPrice, formatTime } from './format'
 
 import { richText, type RichTextValue } from './richtext'
 
@@ -89,6 +91,10 @@ export interface NotifyOptions {
   channel?: ChannelId
   /** Pass the hook's `req` when calling from inside a Payload hook, to share its transaction. */
   req?: PayloadRequest
+  /** The booking this notification is about, if any. */
+  booking?: number
+  /** What happened, for notifications that must be sent at most once (see notifyBookingStatus). */
+  event?: NonNullable<Notification['event']>
 }
 
 /**
@@ -100,13 +106,81 @@ export interface NotifyOptions {
 export const notifyMember = (
   payload: Payload,
   userId: number | string,
-  { title, message, channel = 'bookings', req }: NotifyOptions,
+  { title, message, channel = 'bookings', req, booking, event }: NotifyOptions,
 ): Promise<Notification> =>
   payload.create({
     collection: 'notifications',
-    data: { title, message: toRichText(message), channel, recipient: Number(userId) },
+    data: {
+      title,
+      message: toRichText(message),
+      channel,
+      recipient: Number(userId),
+      booking,
+      event,
+    },
     req,
   })
+
+const relIdOf = (value: unknown): number | null =>
+  value == null
+    ? null
+    : typeof value === 'object' && 'id' in value
+      ? Number((value as { id: unknown }).id)
+      : Number(value)
+
+/**
+ * Tells the member their booking was confirmed (status `paid`) or refunded (status `refunded`), on
+ * the Bookings channel. Each event is sent at most once per booking, like mailing's confirmation
+ * email: a booking that is paid again later, or a hook that runs twice, doesn't send a duplicate.
+ * Returns the notification, or null when nothing was sent. Other statuses send nothing.
+ */
+export const notifyBookingStatus = async (
+  payload: Payload,
+  booking: Booking,
+  { req }: { req?: PayloadRequest } = {},
+): Promise<Notification | null> => {
+  const event =
+    booking.status === 'paid'
+      ? 'booking-confirmed'
+      : booking.status === 'refunded'
+        ? 'booking-refunded'
+        : null
+  const memberId = relIdOf(booking.member)
+  if (!event || memberId === null) return null
+
+  const { totalDocs } = await payload.count({
+    collection: 'notifications',
+    where: { and: [{ booking: { equals: booking.id } }, { event: { equals: event } }] },
+    req,
+  })
+  if (totalDocs > 0) return null
+
+  const session = await payload.findByID({
+    collection: 'sessions',
+    id: relIdOf(booking.session) ?? 0,
+    depth: 1,
+    req,
+  })
+  const workshop = typeof session.workshop === 'object' ? session.workshop : null
+  const what = workshop?.title ?? 'your workshop'
+  const when = `${formatDate(session.startsAt)} at ${formatTime(session.startsAt)}`
+
+  return notifyMember(payload, memberId, {
+    channel: 'bookings',
+    booking: booking.id,
+    event,
+    req,
+    ...(event === 'booking-confirmed'
+      ? {
+          title: 'Booking confirmed',
+          message: `See you at ${what} on ${when}. Your booking reference is ${booking.reference}.`,
+        }
+      : {
+          title: 'Booking refunded',
+          message: `Booking ${booking.reference} for ${what} on ${when} was refunded. ${formatPrice(booking.amount, booking.currency ?? 'EUR')} is on its way back to you, and your seat is free for someone else.`,
+        }),
+  })
+}
 
 /**
  * Sends a broadcast to every member who follows `channel`, e.g. "Kiln firing schedule changed".

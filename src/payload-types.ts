@@ -961,6 +961,11 @@ export interface Notification {
    * When this notification was marked as read
    */
   readAt?: string | null;
+  /**
+   * The booking this notification is about.
+   */
+  booking?: (number | null) | Booking;
+  event?: ('booking-confirmed' | 'booking-refunded') | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1532,6 +1537,8 @@ export interface NotificationsSelect<T extends boolean = true> {
   channel?: T;
   isRead?: T;
   readAt?: T;
+  booking?: T;
+  event?: T;
   updatedAt?: T;
   createdAt?: T;
 }

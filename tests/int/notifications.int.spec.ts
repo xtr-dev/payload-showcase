@@ -85,7 +85,7 @@ describe('Notifications (payload-notifications)', () => {
 
     const inbox = await getInbox(payload, mara)
     const personal = inbox.filter((i) => i.personal)
-    expect(personal.map((i) => i.notification.title)).toContain('Your booking is confirmed')
+    expect(personal.map((i) => i.notification.title)).toContain('Booking confirmed')
     expect(personal.every((i) => relId(i.notification.recipient) === mara.id)).toBe(true)
     expect(inbox.some((i) => !i.personal)).toBe(true)
 
@@ -175,7 +175,7 @@ describe('Notifications (payload-notifications)', () => {
       false,
     )
     // Personal notifications are always delivered, whatever the channel preferences.
-    expect(maraInbox.some((n) => n.title === 'Your booking is confirmed')).toBe(true)
+    expect(maraInbox.some((n) => n.title === 'Booking confirmed')).toBe(true)
 
     // Jonas still follows every channel (the default).
     const jonasInbox = (await getInbox(payload, await fresh(jonas))).map((i) => i.notification.id)
@@ -183,6 +183,59 @@ describe('Notifications (payload-notifications)', () => {
 
     // A member can't read a broadcast they unfollowed through markRead.
     expect(await markRead(payload, await fresh(mara), news.id)).toBe(false)
+  })
+
+  it('notifies the member once when a booking is paid, and when it is refunded', async () => {
+    const booked = new Set(
+      ctx.bookings.filter((b) => relId(b.member) === jonas.id).map((b) => relId(b.session)),
+    )
+    const session = ctx.sessions.find(
+      (s) => !booked.has(s.id) && new Date(s.startsAt) > new Date() && (s.seatsLeft ?? 1) > 0,
+    )!
+    const booking = await payload.create({
+      collection: 'bookings',
+      data: { session: session.id, member: jonas.id, status: 'pending' },
+      user: jonas,
+      overrideAccess: false,
+    })
+    const about = async () =>
+      (
+        await payload.find({
+          collection: 'notifications',
+          where: { booking: { equals: booking.id } },
+          sort: 'createdAt',
+          depth: 0,
+        })
+      ).docs
+    expect(await about()).toHaveLength(0)
+
+    const setStatus = (status: 'paid' | 'refunded' | 'pending') =>
+      payload.update({ collection: 'bookings', id: booking.id, data: { status } })
+
+    await setStatus('paid')
+    let docs = await about()
+    expect(docs.map((n) => [n.title, n.event, n.channel, relId(n.recipient)])).toEqual([
+      ['Booking confirmed', 'booking-confirmed', 'bookings', jonas.id],
+    ])
+    expect(messageText(docs[0].message)).toContain(booking.reference)
+    // Saving the booking again without a status change sends nothing.
+    await payload.update({ collection: 'bookings', id: booking.id, data: { notes: 'Apron' } })
+    expect(await about()).toHaveLength(1)
+
+    await setStatus('refunded')
+    docs = await about()
+    expect(docs.map((n) => n.title)).toEqual(['Booking confirmed', 'Booking refunded'])
+    expect(messageText(docs[1].message)).toContain('refunded')
+
+    // Paid again (e.g. an admin correction): neither notification is repeated.
+    await setStatus('pending')
+    await setStatus('paid')
+    await setStatus('refunded')
+    expect(await about()).toHaveLength(2)
+
+    // The member sees both in their inbox, on the Bookings channel.
+    const inbox = await getInbox(payload, await fresh(jonas))
+    expect(inbox.filter((i) => relId(i.notification.booking) === booking.id)).toHaveLength(2)
   })
 
   it('sends personal notifications with notifyMember', async () => {

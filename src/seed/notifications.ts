@@ -1,7 +1,7 @@
 import type { Payload } from 'payload'
 
 import { formatDate, formatTime } from '@/lib/format'
-import { broadcast, notifyMember } from '@/lib/notifications'
+import { broadcast, notifyBookingStatus, notifyMember } from '@/lib/notifications'
 import { richText } from '@/lib/richtext'
 
 import type { SeedContext } from './types'
@@ -86,14 +86,30 @@ export const seedNotifications = async (
       if (!session || !workshop) continue
       const when = `${formatDate(session.startsAt)} at ${formatTime(session.startsAt)}`
 
-      const confirmed = await notifyMember(payload, member.id, {
-        title: booking.status === 'paid' ? 'Your booking is confirmed' : 'Your seat is reserved',
-        channel: 'bookings',
-        message:
-          booking.status === 'paid'
-            ? `See you at ${workshop.title} on ${when}. Your booking reference is ${booking.reference}.`
-            : `We’re holding a seat for you at ${workshop.title} on ${when}. Complete the payment to confirm booking ${booking.reference}.`,
-      })
+      // Paid bookings get the same "Booking confirmed" notification as a real payment does (the
+      // bookings hook already sent it when reset is false; notifyBookingStatus sends it once).
+      const confirmed =
+        booking.status === 'paid'
+          ? ((await notifyBookingStatus(payload, booking)) ??
+            (
+              await payload.find({
+                collection: 'notifications',
+                where: {
+                  and: [
+                    { booking: { equals: booking.id } },
+                    { event: { equals: 'booking-confirmed' } },
+                  ],
+                },
+                limit: 1,
+              })
+            ).docs[0])
+          : await notifyMember(payload, member.id, {
+              title: 'Your seat is reserved',
+              channel: 'bookings',
+              booking: booking.id,
+              message: `We’re holding a seat for you at ${workshop.title} on ${when}. Complete the payment to confirm booking ${booking.reference}.`,
+            })
+      if (!confirmed) continue
       await backdate(confirmed.id, 72 - n * 10)
 
       if (n === 0) {

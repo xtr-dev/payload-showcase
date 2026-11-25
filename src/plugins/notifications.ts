@@ -1,15 +1,16 @@
 import { notificationsPlugin, type WebPushConfig } from '@xtr-dev/payload-notifications'
-import type { Access, CollectionConfig, Payload, Plugin } from 'payload'
+import type { Access, CollectionAfterChangeHook, CollectionConfig, Payload, Plugin } from 'payload'
 
-import { getUser, isAdmin, isAdminUser, isLoggedIn } from '@/access'
+import { getUser, isAdmin, isAdminField, isAdminUser, isLoggedIn } from '@/access'
 import {
   CHANNELS,
   OPTIONAL_CHANNEL_IDS,
   messageText,
+  notifyBookingStatus,
   pushChannelsFor,
   vapidKeys,
 } from '@/lib/notifications'
-import type { User } from '@/payload-types'
+import type { Booking, User } from '@/payload-types'
 
 import { extendCollection } from './utils'
 
@@ -115,6 +116,28 @@ const ownOrAdmin: Access = ({ req }) => {
 
 const notificationsCollection = (config: CollectionConfig): CollectionConfig => ({
   ...config,
+  fields: [
+    ...config.fields,
+    {
+      name: 'booking',
+      type: 'relationship',
+      relationTo: 'bookings',
+      index: true,
+      access: { update: isAdminField },
+      admin: { position: 'sidebar', description: 'The booking this notification is about.' },
+    },
+    {
+      // Set by notifyBookingStatus so each booking event is announced at most once.
+      name: 'event',
+      type: 'select',
+      options: [
+        { label: 'Booking confirmed', value: 'booking-confirmed' },
+        { label: 'Booking refunded', value: 'booking-refunded' },
+      ],
+      access: { update: isAdminField },
+      admin: { position: 'sidebar', readOnly: true },
+    },
+  ],
   admin: {
     ...config.admin,
     group: 'Notifications',
@@ -200,6 +223,42 @@ const NotificationReads: CollectionConfig = {
   },
 }
 
+/** Set `context: { skipNotifications: true }` on a booking write to send no notification. */
+const SKIP_NOTIFICATIONS = 'skipNotifications'
+
+/**
+ * Notifies the member when a booking becomes `paid` (confirmed) or `refunded`, mirroring mailing's
+ * confirmation email: only on a status transition, and at most once per booking and event. Runs in
+ * the booking write's transaction; a failure is logged and never blocks the booking.
+ */
+const bookingNotifications: CollectionAfterChangeHook<Booking> = async ({
+  doc,
+  previousDoc,
+  operation,
+  req,
+}) => {
+  if (req.context?.[SKIP_NOTIFICATIONS]) return doc
+  const before = operation === 'create' ? undefined : previousDoc?.status
+  if (before === doc.status) return doc
+  try {
+    await notifyBookingStatus(req.payload, doc, { req })
+  } catch (error) {
+    req.payload.logger.error({
+      err: error,
+      msg: `Booking notification for ${doc.reference} failed`,
+    })
+  }
+  return doc
+}
+
+const extendBookings = extendCollection('bookings', (bookings) => ({
+  ...bookings,
+  hooks: {
+    ...bookings.hooks,
+    afterChange: [...(bookings.hooks?.afterChange ?? []), bookingNotifications],
+  },
+}))
+
 const addReadsCollection: Plugin = (config) => ({
   ...config,
   collections: [...(config.collections ?? []), NotificationReads],
@@ -273,4 +332,5 @@ export const notifications: Plugin[] = [
   }),
   addReadsCollection,
   extendUsers,
+  extendBookings,
 ]

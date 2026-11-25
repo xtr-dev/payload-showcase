@@ -10,7 +10,7 @@ import { ShowcaseSection } from '../ShowcaseSection'
 const SNIPPET = `import { notifyMember } from '@/lib/notifications'
 
 await notifyMember(payload, booking.member, {
-  title: 'Your booking is confirmed',
+  title: 'Booking confirmed',
   channel: 'bookings',
   message: 'See you at Wheel Throwing on Saturday.',
 })`
@@ -36,7 +36,7 @@ export const NotificationsShowcase = async () => {
       title="An inbox for members"
       intro="Members get in-app notifications for bookings, reminders and studio news, with a header bell, channels they choose, and optional web push."
       features={[
-        'Personal notifications (“your booking is confirmed”) and broadcasts (“kiln firing schedule changed”)',
+        'Personal notifications (“booking confirmed”, sent when a booking is paid or refunded) and broadcasts (“kiln firing schedule changed”)',
         'Rich-text messages written by staff in the Payload admin',
         'Read and unread state, an unread count in the header and “mark all as read”',
         'Channels (Bookings, Class reminders, Studio news) that members follow in their settings',
