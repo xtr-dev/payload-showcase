@@ -22,6 +22,7 @@ import { UnderlineFeatureClient as UnderlineFeatureClient_e70f5e05f09f93e00b997e
 import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { RefundBookingButton as RefundBookingButton_2c250197aaef497d637a5f2834208d3d } from '@/components/billing/RefundBookingButton'
+import { FeatureFlagsView as FeatureFlagsView_c5c5a656893a6ab675488aed54b5ea6e } from '@xtr-dev/payload-feature-flags/views'
 import { CollectionCards as CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1 } from '@payloadcms/next/rsc'
 
 /** @type import('payload').ImportMap */
@@ -50,5 +51,6 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#BoldFeatureClient": BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@/components/billing/RefundBookingButton#RefundBookingButton": RefundBookingButton_2c250197aaef497d637a5f2834208d3d,
+  "@xtr-dev/payload-feature-flags/views#FeatureFlagsView": FeatureFlagsView_c5c5a656893a6ab675488aed54b5ea6e,
   "@payloadcms/next/rsc#CollectionCards": CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1
 }

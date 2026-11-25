@@ -1,6 +1,7 @@
 import { RichText } from '@payloadcms/richtext-lexical/react'
 
 import { Spiral, Sprig } from '@/components/art/Decor'
+import { HeroExperimentTracker } from '@/components/flags/HeroExperimentTracker'
 import { ButtonLink, Container, MediaImage, SectionHeading } from '@/components/ui'
 import { WorkshopCard } from '@/components/workshops/WorkshopCard'
 import { getCurrentUser } from '@/lib/auth'
@@ -35,6 +36,7 @@ export default async function HomePage() {
     <>
       {/* Hero */}
       <section className="grain overflow-hidden" data-hero-variant={variant}>
+        <HeroExperimentTracker experiment="home-hero" ctaHref={hero?.ctaHref} />
         <Container className="grid items-center gap-12 py-14 lg:grid-cols-[1.05fr_1fr] lg:py-24">
           <div className="relative">
             {hero?.eyebrow && (

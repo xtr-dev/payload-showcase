@@ -26,6 +26,9 @@ importers:
       '@xtr-dev/payload-billing':
         specifier: ^0.4.0
         version: 0.4.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)(stripe@22.6.2(@types/node@22.19.9))
+      '@xtr-dev/payload-feature-flags':
+        specifier: ^0.1.0
+        version: 0.1.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
       cross-env:
         specifier: ^7.0.3
         version: 7.0.3
@@ -2006,6 +2009,14 @@ packages:
       payload: ^3.37.0
       react: ^19.0.0
       stripe: ^18.5.0 || ^19.0.0 || ^20.0.0 || ^21.0.0 || ^22.0.0
+
+  '@xtr-dev/payload-feature-flags@0.1.0':
+    resolution: {integrity: sha512-LI7l9hUVKB1U0SUsjeaePFRnwZI7SuSOeXEquyiOnCoLk7rI/3YB5OpZIuaVWA/MEaZjhpvhkiMA96Sv09FUpQ==}
+    engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
+    peerDependencies:
+      '@payloadcms/ui': ^3.56.0
+      payload: ^3.56.0
+      react: ^19.1.0
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -6259,6 +6270,12 @@ snapshots:
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
       react: 19.2.9
       stripe: 22.6.2(@types/node@22.19.9)
+
+  '@xtr-dev/payload-feature-flags@0.1.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
+    dependencies:
+      '@payloadcms/ui': 3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)
+      payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
+      react: 19.2.9
 
   acorn-jsx@5.3.2(acorn@8.18.0):
     dependencies:

@@ -76,6 +76,8 @@ export interface Config {
     payments: Payment;
     invoices: Invoice;
     refunds: Refund;
+    'feature-flags': FeatureFlag;
+    'experiment-events': ExperimentEvent;
     'payload-kv': PayloadKv;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -93,6 +95,8 @@ export interface Config {
     payments: PaymentsSelect<false> | PaymentsSelect<true>;
     invoices: InvoicesSelect<false> | InvoicesSelect<true>;
     refunds: RefundsSelect<false> | RefundsSelect<true>;
+    'feature-flags': FeatureFlagsSelect<false> | FeatureFlagsSelect<true>;
+    'experiment-events': ExperimentEventsSelect<false> | ExperimentEventsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -588,6 +592,97 @@ export interface Refund {
   createdAt: string;
 }
 /**
+ * Manage feature flags for your application
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "feature-flags".
+ */
+export interface FeatureFlag {
+  id: number;
+  /**
+   * Unique identifier for the feature flag
+   */
+  name: string;
+  /**
+   * Describe what this feature flag controls
+   */
+  description?: string | null;
+  /**
+   * Toggle this feature flag on or off
+   */
+  enabled: boolean;
+  /**
+   * Percentage of users who will see this feature (0-100)
+   */
+  rolloutPercentage?: number | null;
+  /**
+   * Define variants for A/B testing
+   */
+  variants?:
+    | {
+        /**
+         * Variant identifier (e.g., control, variant-a)
+         */
+        name: string;
+        /**
+         * Weight for this variant (all weights should sum to 100)
+         */
+        weight: number;
+        /**
+         * Additional data for this variant
+         */
+        metadata?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Tags for organizing feature flags
+   */
+  tags?:
+    | {
+        tag?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Additional metadata for this feature flag
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * One row per visitor and event: an exposure when they see a homepage hero variant, a conversion when they click its call to action.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "experiment-events".
+ */
+export interface ExperimentEvent {
+  id: number;
+  experiment: string;
+  variant: string;
+  type: 'exposure' | 'conversion';
+  visitorId: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
@@ -747,6 +842,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'refunds';
         value: number | Refund;
+      } | null)
+    | ({
+        relationTo: 'feature-flags';
+        value: number | FeatureFlag;
+      } | null)
+    | ({
+        relationTo: 'experiment-events';
+        value: number | ExperimentEvent;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -997,6 +1100,45 @@ export interface RefundsSelect<T extends boolean = true> {
   description?: T;
   metadata?: T;
   providerData?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "feature-flags_select".
+ */
+export interface FeatureFlagsSelect<T extends boolean = true> {
+  name?: T;
+  description?: T;
+  enabled?: T;
+  rolloutPercentage?: T;
+  variants?:
+    | T
+    | {
+        name?: T;
+        weight?: T;
+        metadata?: T;
+        id?: T;
+      };
+  tags?:
+    | T
+    | {
+        tag?: T;
+        id?: T;
+      };
+  metadata?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "experiment-events_select".
+ */
+export interface ExperimentEventsSelect<T extends boolean = true> {
+  experiment?: T;
+  variant?: T;
+  type?: T;
+  visitorId?: T;
   updatedAt?: T;
   createdAt?: T;
 }
