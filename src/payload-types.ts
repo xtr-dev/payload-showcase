@@ -79,6 +79,9 @@ export interface Config {
     'mail-outbox': MailOutbox;
     'email-templates': EmailTemplate;
     emails: Email;
+    notifications: Notification;
+    'push-subscriptions': PushSubscription;
+    'notification-reads': NotificationRead;
     'feature-flags': FeatureFlag;
     'experiment-events': ExperimentEvent;
     'payload-kv': PayloadKv;
@@ -101,6 +104,9 @@ export interface Config {
     'mail-outbox': MailOutboxSelect<false> | MailOutboxSelect<true>;
     'email-templates': EmailTemplatesSelect<false> | EmailTemplatesSelect<true>;
     emails: EmailsSelect<false> | EmailsSelect<true>;
+    notifications: NotificationsSelect<false> | NotificationsSelect<true>;
+    'push-subscriptions': PushSubscriptionsSelect<false> | PushSubscriptionsSelect<true>;
+    'notification-reads': NotificationReadsSelect<false> | NotificationReadsSelect<true>;
     'feature-flags': FeatureFlagsSelect<false> | FeatureFlagsSelect<true>;
     'experiment-events': ExperimentEventsSelect<false> | ExperimentEventsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
@@ -173,6 +179,10 @@ export interface User {
    * Receives the monthly studio newsletter.
    */
   newsletter?: boolean | null;
+  /**
+   * Broadcast channels this member follows. Bookings are always delivered.
+   */
+  notificationChannels?: ('class-reminders' | 'studio-news')[] | null;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -906,6 +916,113 @@ export interface PayloadJob {
   createdAt: string;
 }
 /**
+ * Leave Recipient empty to broadcast to every member who follows the channel. Read state of broadcasts is tracked per member under Notification reads.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "notifications".
+ */
+export interface Notification {
+  id: number;
+  /**
+   * The notification title that will be displayed to users
+   */
+  title: string;
+  /**
+   * The notification message content
+   */
+  message: {
+    root: {
+      type: string;
+      children: {
+        type: any;
+        version: number;
+        [k: string]: unknown;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  };
+  /**
+   * The user who should receive this notification (optional if using custom recipient fields)
+   */
+  recipient?: (number | null) | User;
+  /**
+   * The notification channel - only subscribers to this channel will receive the notification
+   */
+  channel?: ('bookings' | 'class-reminders' | 'studio-news') | null;
+  /**
+   * Whether this notification has been read by the recipient
+   */
+  isRead?: boolean | null;
+  /**
+   * When this notification was marked as read
+   */
+  readAt?: string | null;
+  /**
+   * The booking this notification is about.
+   */
+  booking?: (number | null) | Booking;
+  event?: ('booking-confirmed' | 'booking-refunded') | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Web push notification subscriptions for users
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "push-subscriptions".
+ */
+export interface PushSubscription {
+  id: number;
+  /**
+   * The user this push subscription belongs to
+   */
+  user: number | User;
+  /**
+   * Push service endpoint URL
+   */
+  endpoint: string;
+  /**
+   * User agent public key for encryption
+   */
+  p256dh: string;
+  /**
+   * User agent authentication secret
+   */
+  auth: string;
+  /**
+   * Browser/device information
+   */
+  userAgent?: string | null;
+  /**
+   * Channels this subscription is subscribed to - leave empty for all notifications
+   */
+  channels?: ('bookings' | 'class-reminders' | 'studio-news')[] | null;
+  /**
+   * Whether this subscription is still active
+   */
+  isActive?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Which member has read which broadcast. Personal notifications use their own Read flag.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "notification-reads".
+ */
+export interface NotificationRead {
+  id: number;
+  user: number | User;
+  notification: number | Notification;
+  key?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * Manage feature flags for your application
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1069,6 +1186,18 @@ export interface PayloadLockedDocument {
         value: number | Email;
       } | null)
     | ({
+        relationTo: 'notifications';
+        value: number | Notification;
+      } | null)
+    | ({
+        relationTo: 'push-subscriptions';
+        value: number | PushSubscription;
+      } | null)
+    | ({
+        relationTo: 'notification-reads';
+        value: number | NotificationRead;
+      } | null)
+    | ({
         relationTo: 'feature-flags';
         value: number | FeatureFlag;
       } | null)
@@ -1129,6 +1258,7 @@ export interface UsersSelect<T extends boolean = true> {
   membershipStatus?: T;
   membershipRenewsAt?: T;
   newsletter?: T;
+  notificationChannels?: T;
   updatedAt?: T;
   createdAt?: T;
   email?: T;
@@ -1393,6 +1523,48 @@ export interface EmailsSelect<T extends boolean = true> {
   jobs?: T;
   booking?: T;
   recipient?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "notifications_select".
+ */
+export interface NotificationsSelect<T extends boolean = true> {
+  title?: T;
+  message?: T;
+  recipient?: T;
+  channel?: T;
+  isRead?: T;
+  readAt?: T;
+  booking?: T;
+  event?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "push-subscriptions_select".
+ */
+export interface PushSubscriptionsSelect<T extends boolean = true> {
+  user?: T;
+  endpoint?: T;
+  p256dh?: T;
+  auth?: T;
+  userAgent?: T;
+  channels?: T;
+  isActive?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "notification-reads_select".
+ */
+export interface NotificationReadsSelect<T extends boolean = true> {
+  user?: T;
+  notification?: T;
+  key?: T;
   updatedAt?: T;
   createdAt?: T;
 }

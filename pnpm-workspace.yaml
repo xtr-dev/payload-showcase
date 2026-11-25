@@ -7,3 +7,4 @@ minimumReleaseAgeExclude:
   - '@xtr-dev/payload-billing@0.4.0'
   - '@xtr-dev/payload-feature-flags@0.1.0'
   - '@xtr-dev/payload-mailing@0.7.0'
+  - '@xtr-dev/payload-notifications@0.1.0'

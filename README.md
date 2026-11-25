@@ -56,6 +56,7 @@ their spots show a placeholder.
 | `pnpm test:e2e`                                   | Playwright against a production build on a freshly seeded database in `.e2e/` (port 3100)              |
 | `pnpm test`                                       | Both test suites                                                                                       |
 | `pnpm generate:types` / `pnpm generate:importmap` | Regenerate `src/payload-types.ts` / the admin import map                                               |
+| `pnpm generate:vapid`                             | Print a VAPID key pair for optional web push (paste into `.env`)                                       |
 
 The first `pnpm test:e2e` builds the app; set `E2E_SKIP_BUILD=1` to reuse an existing build.
 Run `pnpm exec playwright install chromium` once beforehand.
