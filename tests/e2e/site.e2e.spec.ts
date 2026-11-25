@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test'
 import { registerMember, signIn, USERS } from '../helpers/e2e'
 
 test.describe('home', () => {
-  test('renders the hero, featured workshops and testimonials', async ({ page }) => {
+  test('renders the hero, featured workshops and testimonials', async ({ page, baseURL }) => {
+    // Pin the homepage hero A/B test to the control variant (see src/lib/experiments.ts).
+    await page.context().addCookies([{ name: 'kiln_preview_home-hero', value: 'a', url: baseURL! }])
     await page.goto('/')
     await expect(page).toHaveTitle(/Kiln & Co\./)
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Get your hands in the clay.')
