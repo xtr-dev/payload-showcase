@@ -34,13 +34,13 @@ Mara has an active membership and two bookings; Jonas has one. `pnpm seed` refus
 
 ## How each plugin is showcased
 
-| Plugin                                                                               | On the site                                                                                                                             |
-| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@xtr-dev/payload-billing`](https://github.com/xtr-dev/payload-billing)             | Checkout for workshop bookings and memberships (local test provider by default, Stripe/Mollie via env), payments, invoices and refunds. |
-| [`@xtr-dev/payload-mailing`](https://github.com/xtr-dev/payload-mailing)             | Booking confirmation and reminder emails from templates, and a scheduled newsletter. Mail is captured in development.                   |
-| [`@xtr-dev/payload-notifications`](https://github.com/xtr-dev/payload-notifications) | An in-app inbox in the account area, studio-news channels and optional web push.                                                        |
-| [`@xtr-dev/payload-feature-flags`](https://github.com/xtr-dev/payload-feature-flags) | An A/B test on the homepage hero, gated gift cards and a rollout of the new booking flow.                                               |
-| [`@xtr-dev/payload-automation`](https://github.com/xtr-dev/payload-automation)       | Workflows such as "booking paid → confirmation email + notification", plus a webhook-triggered workflow.                                |
+| Plugin                                                                               | On the site                                                                                                                                                    |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@xtr-dev/payload-billing`](https://github.com/xtr-dev/payload-billing)             | Checkout for workshop bookings and memberships (local test provider by default, Stripe/Mollie via env), payments, invoices and refunds.                        |
+| [`@xtr-dev/payload-mailing`](https://github.com/xtr-dev/payload-mailing)             | Booking confirmation and reminder emails from templates, and a scheduled newsletter. Mail is captured in development.                                          |
+| [`@xtr-dev/payload-notifications`](https://github.com/xtr-dev/payload-notifications) | An in-app inbox in the account area, studio-news channels and optional web push.                                                                               |
+| [`@xtr-dev/payload-feature-flags`](https://github.com/xtr-dev/payload-feature-flags) | An A/B test on the homepage hero, gated gift cards and a rollout of the new booking flow.                                                                      |
+| [`@xtr-dev/payload-automation`](https://github.com/xtr-dev/payload-automation)       | Code-defined workflows: booking paid → confirmation email + studio log, a kiln-alert webhook, opening-hours changes and an admin-run digest, with run history. |
 
 The `/showcase` page explains each one. The plugins are being wired in one at a time; until then
 their spots show a placeholder.
