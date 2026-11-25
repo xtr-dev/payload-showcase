@@ -6,6 +6,7 @@ import { Alert, Badge, ButtonLink, Card, Container } from '@/components/ui'
 import { requireUser } from '@/lib/auth'
 import { formatPrice } from '@/lib/format'
 
+import { BillingSection } from './sections/Billing'
 import { BookingsSection } from './sections/Bookings'
 import { NotificationsSection } from './sections/Notifications'
 import { SettingsSection } from './sections/Settings'
@@ -62,6 +63,7 @@ export default async function AccountPage({
       <div className="mt-10 grid gap-8 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-8">
           <BookingsSection user={user} />
+          <BillingSection user={user} />
           <NotificationsSection user={user} />
         </div>
         <aside className="space-y-8">
