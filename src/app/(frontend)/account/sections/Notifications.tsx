@@ -1,7 +1,7 @@
 import { RichText } from '@payloadcms/richtext-lexical/react'
 
-import { markAllNotificationsRead, markNotificationRead } from '@/components/notifications/actions'
-import { Badge, Button, Card, cn } from '@/components/ui'
+import { MarkAllReadButton, ReadToggle } from '@/components/notifications/ReadButtons'
+import { Badge, Card, cn } from '@/components/ui'
 import { formatDate, formatTime } from '@/lib/format'
 import { channelName, getInbox } from '@/lib/notifications'
 import { getPayloadClient } from '@/lib/payload'
@@ -9,7 +9,8 @@ import type { User } from '@/payload-types'
 
 /**
  * The member's in-app inbox: their own notifications (booking confirmations, class reminders)
- * plus broadcasts on the channels they follow, with per-member read state.
+ * plus broadcasts on the channels they follow, with per-member read state. Read buttons call the
+ * plugin's read endpoint (see ReadButtons.tsx).
  */
 export const NotificationsSection = async ({ user }: { user: User }) => {
   const payload = await getPayloadClient()
@@ -28,11 +29,7 @@ export const NotificationsSection = async ({ user }: { user: User }) => {
           </Badge>
         </div>
         {unread > 0 && (
-          <form action={markAllNotificationsRead}>
-            <Button type="submit" variant="ghost" size="sm">
-              Mark all as read
-            </Button>
-          </form>
+          <MarkAllReadButton ids={items.filter((i) => !i.read).map((i) => i.notification.id)} />
         )}
       </div>
 
@@ -73,19 +70,7 @@ export const NotificationsSection = async ({ user }: { user: User }) => {
                     </time>
                   </p>
                 </div>
-                {!read && (
-                  <form action={markNotificationRead}>
-                    <input type="hidden" name="id" value={n.id} />
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Mark “${n.title}” as read`}
-                    >
-                      Mark as read
-                    </Button>
-                  </form>
-                )}
+                <ReadToggle id={n.id} title={n.title} read={read} />
               </div>
               <RichText data={n.message} className="prose-kiln mt-3 text-base" />
             </li>

@@ -50,16 +50,6 @@ export const isExperiment = (value: unknown): value is ExperimentName =>
   typeof value === 'string' && (EXPERIMENT_NAMES as string[]).includes(value)
 
 /**
- * The id that the plugin hashes for one flag and one visitor or user.
- *
- * The plugin buckets on the id alone, without the flag name, so every flag would put the same
- * visitors in the same bucket: whoever is in the first 50% of one rollout is in the first 50% of
- * every rollout and always lands on the first variant of every experiment. Prefixing the flag name
- * gives each flag its own, independent split. Server helpers and client hooks must both use this.
- */
-export const bucketKey = (flag: string, subjectId: number | string) => `${flag}:${subjectId}`
-
-/**
  * Whether a flag is on for a visitor or user. Without a subject only the on/off switch counts;
  * with one, the flag's rollout percentage applies too (sticky per subject).
  */
@@ -69,11 +59,9 @@ export const evaluateFlag = async (
   subjectId?: number | string,
 ): Promise<boolean> => {
   if (subjectId === undefined || subjectId === '') return isFeatureEnabled(flag, payload)
-  // The plugin reads a rollout of 0% as "no rollout configured" and lets everyone in, so an
-  // explicit 0% is handled here: the flag is on, but for nobody yet.
-  const definition = await getFeatureFlag(flag, payload)
-  if (definition?.enabled && definition.rolloutPercentage === 0) return false
-  return isUserInRollout(flag, bucketKey(flag, subjectId), payload)
+  // The plugin buckets per flag (it hashes the flag name with the id), so each rollout and
+  // experiment gets an independent split, and a rollout of 0% means nobody.
+  return isUserInRollout(flag, String(subjectId), payload)
 }
 
 /**
@@ -86,7 +74,7 @@ export const assignVariant = async (
   subjectId?: number | string,
 ): Promise<Variant> => {
   if (subjectId === undefined || subjectId === '') return 'a'
-  const variant = await getUserVariant(experiment, bucketKey(experiment, subjectId), payload)
+  const variant = await getUserVariant(experiment, String(subjectId), payload)
   return isVariant(variant) ? variant : 'a'
 }
 

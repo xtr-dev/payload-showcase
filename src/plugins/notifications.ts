@@ -1,11 +1,10 @@
 import { notificationsPlugin, type WebPushConfig } from '@xtr-dev/payload-notifications'
-import type { Access, CollectionAfterChangeHook, CollectionConfig, Payload, Plugin } from 'payload'
+import type { CollectionAfterChangeHook, CollectionConfig, Payload, Plugin } from 'payload'
 
-import { getUser, isAdmin, isAdminField, isAdminUser, isLoggedIn } from '@/access'
+import { isAdminField } from '@/access'
 import {
   CHANNELS,
   OPTIONAL_CHANNEL_IDS,
-  messageText,
   notifyBookingStatus,
   pushChannelsFor,
   vapidKeys,
@@ -33,17 +32,19 @@ const relId = (value: unknown): number | null => {
 /**
  * Picks the devices a notification is pushed to. Personal notifications go to all of the
  * recipient's devices; broadcasts go to devices whose channels include the notification's channel.
- * Subscription channels are kept in sync with the member's preferences by the users hook below.
+ * A personal notification whose recipient was deleted goes nowhere. Subscription channels are kept
+ * in sync with the member's preferences by the users hook below.
  */
 const findSubscriptions = async (notification: Record<string, unknown>, payload: Payload) => {
   const recipient = relId(notification.recipient)
   const channel = typeof notification.channel === 'string' ? notification.channel : null
+  if (notification.audience !== 'broadcast' && recipient === null) return []
   const { docs } = await payload.find({
     collection: 'push-subscriptions',
     where: {
       and: [
         { isActive: { equals: true } },
-        recipient !== null
+        notification.audience !== 'broadcast'
           ? { user: { equals: recipient } }
           : channel
             ? { channels: { in: [channel] } }
@@ -66,54 +67,17 @@ const webPush = (): WebPushConfig | undefined => {
     vapidPrivateKey: keys.privateKey,
     vapidSubject: process.env.VAPID_SUBJECT || 'mailto:hello@kiln.test',
     findSubscriptions,
-    // The plugin's default links to the admin panel and only reads Slate-style rich text, so
-    // members get a plain-text excerpt and a link to their own inbox instead.
-    transformNotification: (doc: { id: number; title: string; message: unknown }) => {
-      const body = messageText(doc.message)
-      return {
-        title: doc.title,
-        body: body.length > 120 ? `${body.slice(0, 117)}…` : body || 'You have a new notification',
-        tag: `notification-${doc.id}`,
-        // The plugin's service worker reads `id` and `trackClose` when it reports a closed
-        // notification to the /api/push-notifications/track endpoint.
-        data: {
-          url: '/account#notifications',
-          notificationId: doc.id,
-          id: doc.id,
-          trackClose: true,
-        },
-      }
-    },
+    // The plugin's default transformer sends the title and a plain-text excerpt of the message;
+    // a click opens the member's inbox.
+    notificationUrl: '/account#notifications',
   }
 }
 
 /**
- * Members read their own notifications and broadcasts; only admins write notification content.
- * The plugin's defaults let any signed-in user read every notification and create new ones, and
- * let members flip `isRead` on broadcasts, which is shared by everyone. Members may update only
- * their own personal notifications (and, via the plugin's field access, only isRead/readAt).
+ * Adds the booking link and event to notifications and groups the plugin's collections in the
+ * admin. Access stays the plugin's default: members read their own notifications and broadcasts,
+ * only admins write content, and broadcast read state is kept per member in `notification-reads`.
  */
-const ownOrBroadcast: Access = ({ req }) => {
-  const user = getUser(req)
-  if (!user) return false
-  if (isAdminUser(user)) return true
-  return { or: [{ recipient: { equals: user.id } }, { recipient: { exists: false } }] }
-}
-
-const ownPersonal: Access = ({ req }) => {
-  const user = getUser(req)
-  if (!user) return false
-  if (isAdminUser(user)) return true
-  return { recipient: { equals: user.id } }
-}
-
-const ownOrAdmin: Access = ({ req }) => {
-  const user = getUser(req)
-  if (!user) return false
-  if (isAdminUser(user)) return true
-  return { user: { equals: user.id } }
-}
-
 const notificationsCollection = (config: CollectionConfig): CollectionConfig => ({
   ...config,
   fields: [
@@ -141,87 +105,11 @@ const notificationsCollection = (config: CollectionConfig): CollectionConfig => 
   admin: {
     ...config.admin,
     group: 'Notifications',
-    defaultColumns: ['title', 'channel', 'recipient', 'isRead', 'createdAt'],
+    defaultColumns: ['title', 'channel', 'audience', 'recipient', 'createdAt'],
     description:
       'Leave Recipient empty to broadcast to every member who follows the channel. Read state of broadcasts is tracked per member under Notification reads.',
   },
-  access: {
-    ...config.access,
-    read: ownOrBroadcast,
-    create: isAdmin,
-    update: ownPersonal,
-    delete: isAdmin,
-  },
-  hooks: {
-    ...config.hooks,
-    afterDelete: [
-      ...(config.hooks?.afterDelete ?? []),
-      async ({ id, req }) => {
-        await req.payload.delete({
-          collection: 'notification-reads',
-          where: { notification: { equals: id } },
-          req,
-        })
-      },
-    ],
-  },
 })
-
-/** Per-member read receipts for broadcasts. */
-const NotificationReads: CollectionConfig = {
-  slug: 'notification-reads',
-  labels: { singular: 'Notification read', plural: 'Notification reads' },
-  admin: {
-    group: 'Notifications',
-    useAsTitle: 'key',
-    defaultColumns: ['user', 'notification', 'createdAt'],
-    description:
-      'Which member has read which broadcast. Personal notifications use their own Read flag.',
-  },
-  access: {
-    read: ownOrAdmin,
-    create: isLoggedIn,
-    update: isAdmin,
-    delete: ownOrAdmin,
-  },
-  fields: [
-    { name: 'user', type: 'relationship', relationTo: 'users', required: true, index: true },
-    {
-      name: 'notification',
-      type: 'relationship',
-      relationTo: 'notifications',
-      required: true,
-    },
-    {
-      // `user:notification`, so a member can't record the same read twice.
-      name: 'key',
-      type: 'text',
-      unique: true,
-      admin: { readOnly: true },
-    },
-  ],
-  hooks: {
-    beforeChange: [
-      async ({ data, req }) => {
-        const user = getUser(req)
-        if (user && !isAdminUser(user)) {
-          data.user = user.id
-          const notification = await req.payload.findByID({
-            collection: 'notifications',
-            id: relId(data.notification) ?? 0,
-            depth: 0,
-            req,
-          })
-          if (relId(notification.recipient) !== null) {
-            throw new Error('Read receipts are only for broadcasts.')
-          }
-        }
-        data.key = `${relId(data.user)}:${relId(data.notification)}`
-        return data
-      },
-    ],
-  },
-}
 
 /** Set `context: { skipNotifications: true }` on a booking write to send no notification. */
 const SKIP_NOTIFICATIONS = 'skipNotifications'
@@ -259,16 +147,9 @@ const extendBookings = extendCollection('bookings', (bookings) => ({
   },
 }))
 
-const addReadsCollection: Plugin = (config) => ({
-  ...config,
-  collections: [...(config.collections ?? []), NotificationReads],
-})
-
 /**
- * Users get a `notificationChannels` preference. Their push subscriptions follow it, and their
- * notifications, receipts and devices are removed with them: the plugin stores broadcasts as
- * notifications without a recipient, so a deleted member's notifications would otherwise turn
- * into broadcasts for everyone.
+ * Users get a `notificationChannels` preference, and their push subscriptions follow it. (The
+ * plugin itself removes a deleted member's notifications, read receipts and devices.)
  */
 const extendUsers = extendCollection('users', (users) => ({
   ...users,
@@ -303,20 +184,13 @@ const extendUsers = extendCollection('users', (users) => ({
         return doc
       },
     ],
-    beforeDelete: [
-      ...(users.hooks?.beforeDelete ?? []),
-      async ({ id, req }) => {
-        for (const [collection, field] of [
-          ['notifications', 'recipient'],
-          ['notification-reads', 'user'],
-          ['push-subscriptions', 'user'],
-        ] as const) {
-          await req.payload.delete({ collection, where: { [field]: { equals: id } }, req })
-        }
-      },
-    ],
   },
 }))
+
+const inGroup = (config: CollectionConfig): CollectionConfig => ({
+  ...config,
+  admin: { ...config.admin, group: 'Notifications' },
+})
 
 export const notifications: Plugin[] = [
   notificationsPlugin({
@@ -324,13 +198,10 @@ export const notifications: Plugin[] = [
     webPush: webPush(),
     collectionOverrides: {
       notifications: notificationsCollection,
-      pushSubscriptions: (config) => ({
-        ...config,
-        admin: { ...config.admin, group: 'Notifications' },
-      }),
+      pushSubscriptions: inGroup,
+      notificationReads: inGroup,
     },
   }),
-  addReadsCollection,
   extendUsers,
   extendBookings,
 ]

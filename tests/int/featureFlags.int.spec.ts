@@ -4,7 +4,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import {
   assignVariant,
-  bucketKey,
   EVENTS_SLUG,
   evaluateFlag,
   FLAGS_SLUG,
@@ -114,10 +113,9 @@ describe('FeatureFlags (payload-feature-flags)', () => {
   it('answers the public evaluate endpoint with the same buckets as the server', async () => {
     const evaluate = endpoint(FLAGS_SLUG, '/evaluate')
     const visitor = randomUUID()
-    const key = bucketKey('home-hero', visitor)
     const res = await evaluate.handler({
       payload,
-      url: `http://localhost/api/feature-flags/evaluate?names=home-hero,secret&userId=${key}`,
+      url: `http://localhost/api/feature-flags/evaluate?names=home-hero,secret&userId=${visitor}`,
     } as never)
     const { flags } = (await res.json()) as {
       flags: Record<string, { enabled: boolean; variant?: string | null }>

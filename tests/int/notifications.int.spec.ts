@@ -1,15 +1,7 @@
-import type { Payload } from 'payload'
+import { createLocalReq, type Payload } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import {
-  broadcast,
-  countUnread,
-  getInbox,
-  markAllRead,
-  markRead,
-  messageText,
-  notifyMember,
-} from '@/lib/notifications'
+import { broadcast, countUnread, getInbox, notifyMember } from '@/lib/notifications'
 import { richText } from '@/lib/richtext'
 import type { User } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
@@ -23,6 +15,24 @@ let mara: User
 let jonas: User
 
 const relId = (v: unknown) => (v && typeof v === 'object' ? (v as { id: number }).id : (v ?? null))
+
+/** Whether a rich-text message contains `text` (in any text node). */
+const mentions = (message: unknown, text: string) => JSON.stringify(message).includes(text)
+
+/**
+ * Calls the plugin's `POST`/`DELETE /api/notifications/:id/read` endpoint as `user`, the way the
+ * inbox buttons do, and returns the HTTP status.
+ */
+const setRead = async (user: User, id: number, read: boolean): Promise<number> => {
+  const endpoint = (payload.collections.notifications.config.endpoints || []).find(
+    (e) => e.path === '/:id/read' && e.method === (read ? 'post' : 'delete'),
+  )
+  if (!endpoint) throw new Error('The notifications read endpoint is not registered')
+  const req = await createLocalReq({ user: { ...user, collection: 'users' } }, payload)
+  req.routeParams = { id }
+  const res = await endpoint.handler(req)
+  return res.status
+}
 
 /** Re-reads a user, so preference changes made during a test are picked up. */
 const fresh = (user: User) => payload.findByID({ collection: 'users', id: user.id })
@@ -60,13 +70,16 @@ describe('Notifications (payload-notifications)', () => {
 
   it('seeds personal notifications per member and rich-text broadcasts', async () => {
     const all = await payload.find({ collection: 'notifications', pagination: false, depth: 0 })
-    const broadcasts = all.docs.filter((n) => relId(n.recipient) === null)
+    const broadcasts = all.docs.filter((n) => n.audience === 'broadcast')
     expect(broadcasts.map((n) => n.title)).toContain('Kiln firing schedule changed')
+    expect(broadcasts.every((n) => relId(n.recipient) === null)).toBe(true)
     for (const member of ctx.members) {
-      expect(all.docs.some((n) => relId(n.recipient) === member.id)).toBe(true)
+      expect(all.docs.some((n) => relId(n.recipient) === member.id && n.audience === 'user')).toBe(
+        true,
+      )
     }
     const firing = broadcasts.find((n) => n.title === 'Kiln firing schedule changed')!
-    expect(messageText(firing.message)).toContain('What this means for you')
+    expect(mentions(firing.message, 'What this means for you')).toBe(true)
   })
 
   it('shows a member only their own notifications and broadcasts', async () => {
@@ -79,7 +92,7 @@ describe('Notifications (payload-notifications)', () => {
       overrideAccess: false,
     })
     expect(docs.length).toBeGreaterThan(0)
-    expect(docs.every((n) => [mara.id, null].includes(relId(n.recipient) as number | null))).toBe(
+    expect(docs.every((n) => relId(n.recipient) === mara.id || n.audience === 'broadcast')).toBe(
       true,
     )
 
@@ -102,7 +115,7 @@ describe('Notifications (payload-notifications)', () => {
     const openStudio = inbox.find((i) => i.notification.title === 'Open studio hours this weekend')!
     expect(firing.read).toBe(false)
 
-    expect(await markRead(payload, mara, personal.notification.id)).toBe(true)
+    expect(await setRead(mara, personal.notification.id, true)).toBe(200)
     const stored = await payload.findByID({
       collection: 'notifications',
       id: personal.notification.id,
@@ -110,9 +123,9 @@ describe('Notifications (payload-notifications)', () => {
     expect(stored.isRead).toBe(true)
     expect(stored.readAt).toBeTruthy()
 
-    expect(await markRead(payload, mara, openStudio.notification.id)).toBe(true)
+    expect(await setRead(mara, openStudio.notification.id, true)).toBe(200)
     // Marking twice is harmless.
-    expect(await markRead(payload, mara, openStudio.notification.id)).toBe(true)
+    expect(await setRead(mara, openStudio.notification.id, true)).toBe(200)
     expect(await countUnread(payload, mara)).toBe(before - 2)
 
     // The broadcast is read for Mara only: the plugin's shared flag stays untouched, and Jonas
@@ -131,8 +144,18 @@ describe('Notifications (payload-notifications)', () => {
         .read,
     ).toBe(true)
 
-    expect(await markAllRead(payload, mara)).toBe(before - 2)
+    // Marking unread again is per member too.
+    expect(await setRead(mara, openStudio.notification.id, false)).toBe(200)
+    expect(await countUnread(payload, mara)).toBe(before - 1)
+
+    for (const item of (await getInbox(payload, mara)).filter((i) => !i.read)) {
+      expect(await setRead(mara, item.notification.id, true)).toBe(200)
+    }
     expect(await countUnread(payload, mara)).toBe(0)
+
+    // Nobody can change another member's personal read state.
+    const jonasPersonal = (await getInbox(payload, jonas)).find((i) => i.personal)!
+    expect(await setRead(mara, jonasPersonal.notification.id, true)).toBe(404)
   })
 
   it('does not let members flip the shared read flag of a broadcast', async () => {
@@ -181,8 +204,7 @@ describe('Notifications (payload-notifications)', () => {
     const jonasInbox = (await getInbox(payload, await fresh(jonas))).map((i) => i.notification.id)
     expect(jonasInbox).toEqual(expect.arrayContaining([reminder.id, news.id]))
 
-    // A member can't read a broadcast they unfollowed through markRead.
-    expect(await markRead(payload, await fresh(mara), news.id)).toBe(false)
+    expect(news.audience).toBe('broadcast')
   })
 
   it('notifies the member once when a booking is paid, and when it is refunded', async () => {
@@ -218,7 +240,7 @@ describe('Notifications (payload-notifications)', () => {
     expect(docs.map((n) => [n.title, n.event, n.channel, relId(n.recipient)])).toEqual([
       ['Booking confirmed', 'booking-confirmed', 'bookings', jonas.id],
     ])
-    expect(messageText(docs[0].message)).toContain(booking.reference)
+    expect(mentions(docs[0].message, booking.reference!)).toBe(true)
     // Saving the booking again without a status change sends nothing.
     await payload.update({ collection: 'bookings', id: booking.id, data: { notes: 'Apron' } })
     expect(await about()).toHaveLength(1)
@@ -226,7 +248,7 @@ describe('Notifications (payload-notifications)', () => {
     await setStatus('refunded')
     docs = await about()
     expect(docs.map((n) => n.title)).toEqual(['Booking confirmed', 'Booking refunded'])
-    expect(messageText(docs[1].message)).toContain('refunded')
+    expect(mentions(docs[1].message, 'refunded')).toBe(true)
 
     // Paid again (e.g. an admin correction): neither notification is repeated.
     await setStatus('pending')
@@ -251,7 +273,9 @@ describe('Notifications (payload-notifications)', () => {
     })
     expect(relId(doc.recipient)).toBe(jonas.id)
     expect(doc.channel).toBe('bookings')
-    expect(messageText(doc.message)).toBe('See you Saturday. Bring an apron.')
+    expect(doc.audience).toBe('user')
+    expect(mentions(doc.message, 'See you Saturday.')).toBe(true)
+    expect(mentions(doc.message, 'Bring an apron.')).toBe(true)
 
     const jonasInbox = await getInbox(payload, await fresh(jonas))
     expect(jonasInbox[0].notification.id).toBe(doc.id)

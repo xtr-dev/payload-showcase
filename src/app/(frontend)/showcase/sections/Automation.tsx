@@ -150,7 +150,7 @@ export const AutomationShowcase = async () => {
         <Alert tone="warning" title="Not shown, because it doesn’t work yet">
           <ul className="mt-1 list-disc space-y-1 pl-5">
             <li>
-              Scheduled (cron) triggers can be configured but never fire in version 0.1.0 (
+              Scheduled (cron) triggers can be configured but never fire in version 0.2.0 (
               <a
                 href="https://github.com/xtr-dev/payload-automation/issues/7"
                 className="font-semibold underline"

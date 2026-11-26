@@ -55,7 +55,7 @@ const settle = async (payment: Payment, scenarioId: string): Promise<Payment> =>
   )
   expect(res.status).toBe(200)
   const initial = payment.status
-  // The test provider applies the outcome after the scenario's delay (about a second).
+  // The test provider applies the outcome after the scenario's delay (none for instant-success).
   for (let i = 0; i < 50; i++) {
     const current = await payload.findByID({ collection: 'payments', id: payment.id })
     if (current.status !== initial) return current
@@ -112,7 +112,9 @@ describe('Billing (payload-billing)', () => {
   it('is wired into the Payload config', () => {
     const slugs = payload.config.collections.map((c) => c.slug)
     expect(slugs).toEqual(expect.arrayContaining(['payments', 'invoices', 'refunds']))
-    expect(payload.config.jobs.tasks?.map((task) => task.slug)).toContain('billingRefundSweep')
+    expect(payload.config.jobs.tasks?.map((task) => task.slug)).toEqual(
+      expect.arrayContaining(['billingProcessRefund', 'billingRefundSweep']),
+    )
   })
 
   describe('booking checkout', () => {
@@ -230,10 +232,10 @@ describe('Billing (payload-billing)', () => {
       expect(await bookingStatus(booking)).toBe('paid')
     })
 
-    it('sends refunds created in the admin from the refund sweep job', async () => {
+    it('sends refunds created in the admin through the billing job queue', async () => {
       const { booking, payment } = await book(mara, nextSession())
       await settle(payment, 'instant-success')
-      // Creating a refund document only reserves it; the sweep sends it to the provider.
+      // Creating a refund document only reserves it; the plugin queues a job that sends it.
       const reserved = await payload.create({
         collection: 'refunds',
         data: { payment: payment.id, amount: payment.amount, currency: 'EUR', status: 'pending' },
@@ -241,13 +243,57 @@ describe('Billing (payload-billing)', () => {
         overrideAccess: false,
       })
       expect(reserved.status).toBe('pending')
+      const { docs: jobs } = await payload.find({
+        collection: 'payload-jobs',
+        where: { taskSlug: { equals: 'billingProcessRefund' } },
+        depth: 0,
+      })
+      expect(jobs.map((j) => [j.queue, (j.input as { refundId?: unknown })?.refundId])).toEqual([
+        ['billing', reserved.id],
+      ])
 
-      await payload.jobs.queue({ task: 'billingRefundSweep', input: {} })
-      await payload.jobs.run()
+      await payload.jobs.run({ queue: 'billing' })
 
       const sent = await payload.findByID({ collection: 'refunds', id: reserved.id })
       expect(sent.status).toBe('succeeded')
       expect(sent.providerId).toMatch(/^test_re_/)
+      expect(await bookingStatus(booking)).toBe('refunded')
+    })
+
+    it('does not queue a job for refunds the refund endpoint already sent', async () => {
+      const count = async () =>
+        (
+          await payload.count({
+            collection: 'payload-jobs',
+            where: { taskSlug: { equals: 'billingProcessRefund' } },
+          })
+        ).totalDocs
+      const before = await count()
+      const { payment } = await book(mara, nextSession())
+      await settle(payment, 'instant-success')
+      await refundPayment(payload, { paymentId: payment.id, reason: 'other' })
+      expect(await count()).toBe(before)
+    })
+
+    it('sends a pending refund whose job is gone from the refund sweep', async () => {
+      const { booking, payment } = await book(mara, nextSession())
+      await settle(payment, 'instant-success')
+      const reserved = await payload.create({
+        collection: 'refunds',
+        data: { payment: payment.id, amount: payment.amount, currency: 'EUR', status: 'pending' },
+        user: ctx.admin,
+        overrideAccess: false,
+      })
+      await payload.delete({
+        collection: 'payload-jobs',
+        where: { taskSlug: { equals: 'billingProcessRefund' } },
+      })
+
+      await payload.jobs.queue({ task: 'billingRefundSweep', input: {}, queue: 'billing' })
+      await payload.jobs.run({ queue: 'billing' })
+
+      const sent = await payload.findByID({ collection: 'refunds', id: reserved.id })
+      expect(sent.status).toBe('succeeded')
       expect(await bookingStatus(booking)).toBe('refunded')
     })
   })

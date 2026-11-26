@@ -24,7 +24,7 @@ export interface FlagDebugPanelProps {
     giftCards: boolean
     newBookingFlow: boolean
   }
-  /** The ids the client hooks bucket on; the same flag-prefixed ids the server uses. */
+  /** The ids the client hooks bucket on; the same ids the server uses. */
   keys: { hero: string; rollout: string }
 }
 

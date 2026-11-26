@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/auth'
-import { markAllRead, markRead, notifyMember, OPTIONAL_CHANNEL_IDS } from '@/lib/notifications'
+import { notifyMember, OPTIONAL_CHANNEL_IDS } from '@/lib/notifications'
 import { getPayloadClient } from '@/lib/payload'
 import type { User } from '@/payload-types'
 
@@ -16,21 +16,6 @@ const signedIn = async (): Promise<User> => {
 
 /** Re-renders every page, so the header bell's unread count updates along with the inbox. */
 const refresh = () => revalidatePath('/', 'layout')
-
-/** Marks one notification in the signed-in member's inbox as read. */
-export async function markNotificationRead(formData: FormData): Promise<void> {
-  const user = await signedIn()
-  const id = Number(formData.get('id'))
-  if (Number.isInteger(id)) await markRead(await getPayloadClient(), user, id)
-  refresh()
-}
-
-/** Marks the whole inbox as read. */
-export async function markAllNotificationsRead(): Promise<void> {
-  const user = await signedIn()
-  await markAllRead(await getPayloadClient(), user)
-  refresh()
-}
 
 /** Saves which broadcast channels the member follows (checkboxes named `channel`). */
 export async function saveNotificationChannels(formData: FormData): Promise<void> {

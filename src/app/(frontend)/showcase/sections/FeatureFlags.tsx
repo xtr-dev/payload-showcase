@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { FlagDebugPanel } from '@/components/flags/FlagDebugPanel'
 import { Card } from '@/components/ui'
 import { getCurrentUser } from '@/lib/auth'
-import { bucketKey, getExperimentResults } from '@/lib/experiments'
+import { getExperimentResults } from '@/lib/experiments'
 import { getPreviewVariant, getVariant, getVisitorId, isEnabled } from '@/lib/flags'
 import { getPayloadClient } from '@/lib/payload'
 
@@ -50,7 +50,7 @@ export const FeatureFlagsShowcase = async () => {
         ['Homepage', '/'],
         ['Gift cards', '/gift-cards'],
         ['Booking', '/workshops'],
-        ['Admin dashboard', '/admin/collections/feature-flags'],
+        ['Admin dashboard', '/admin/feature-flags-overview'],
       ]}
       status="live"
       tone="bisque"
@@ -62,9 +62,8 @@ export const FeatureFlagsShowcase = async () => {
           rolloutSubject={user ? 'member' : 'visitor'}
           server={{ heroVariant, heroPreview: heroPreview !== null, giftCards, newBookingFlow }}
           keys={{
-            hero: heroSubject === undefined ? '' : bucketKey('home-hero', heroSubject),
-            rollout:
-              rolloutSubject === undefined ? '' : bucketKey('new-booking-flow', rolloutSubject),
+            hero: heroSubject === undefined ? '' : String(heroSubject),
+            rollout: rolloutSubject === undefined ? '' : String(rolloutSubject),
           }}
         />
 
@@ -150,17 +149,21 @@ export const FeatureFlagsShowcase = async () => {
             })}
           </ul>
           <p className="mt-3 text-sm text-ink-soft">
-            Sign in as <code className="font-mono">admin@kiln.test</code> and open{' '}
+            Sign in as <code className="font-mono">admin@kiln.test</code> and open the plugin’s{' '}
+            <Link
+              href="/admin/feature-flags-overview"
+              className="font-semibold text-clay underline-offset-4 hover:underline"
+            >
+              feature flags dashboard
+            </Link>{' '}
+            to toggle them, or edit them under{' '}
             <Link
               href="/admin/collections/feature-flags"
               className="font-semibold text-clay underline-offset-4 hover:underline"
             >
               Experiments → Feature Flags
-            </Link>{' '}
-            to toggle them. The plugin’s standalone{' '}
-            <code className="font-mono">/admin/feature-flags-overview</code> page still shows
-            “Authentication Required” in 0.1.0 (a fix is open upstream as plugin PR #40), so the
-            same dashboard is mounted as the collection’s list view instead.
+            </Link>
+            .
           </p>
         </Card>
       </div>

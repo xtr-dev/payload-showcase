@@ -146,6 +146,7 @@ export interface Config {
   user: User;
   jobs: {
     tasks: {
+      billingProcessRefund: TaskBillingProcessRefund;
       billingRefundSweep: TaskBillingRefundSweep;
       'process-email': TaskProcessEmail;
       'http-request-step': TaskHttpRequestStep;
@@ -696,7 +697,7 @@ export interface EmailTemplate {
   variables?:
     | {
         /**
-         * Variable name as referenced in the template, e.g. firstName (without the {{ }}).
+         * Variable name as referenced in the template, e.g. firstName or user.name (without the {{ }}).
          */
         name: string;
         /**
@@ -884,6 +885,7 @@ export interface PayloadJob {
         completedAt: string;
         taskSlug:
           | 'inline'
+          | 'billingProcessRefund'
           | 'billingRefundSweep'
           | 'process-email'
           | 'http-request-step'
@@ -927,6 +929,7 @@ export interface PayloadJob {
   taskSlug?:
     | (
         | 'inline'
+        | 'billingProcessRefund'
         | 'billingRefundSweep'
         | 'process-email'
         | 'http-request-step'
@@ -1453,11 +1456,15 @@ export interface Notification {
    */
   recipient?: (number | null) | User;
   /**
+   * Who can see this notification. Left empty on create, it becomes "Broadcast" when there is no recipient and "Recipient only" otherwise.
+   */
+  audience?: ('user' | 'broadcast') | null;
+  /**
    * The notification channel - only subscribers to this channel will receive the notification
    */
   channel?: ('bookings' | 'class-reminders' | 'studio-news') | null;
   /**
-   * Whether this notification has been read by the recipient
+   * Whether the recipient has read this notification. For broadcasts, reads return the requesting user's own read state.
    */
   isRead?: boolean | null;
   /**
@@ -1512,16 +1519,16 @@ export interface PushSubscription {
   createdAt: string;
 }
 /**
- * Which member has read which broadcast. Personal notifications use their own Read flag.
+ * Which user has read which broadcast. Personal notifications use their own Read flag.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "notification-reads".
  */
 export interface NotificationRead {
   id: number;
-  user: number | User;
   notification: number | Notification;
-  key?: string | null;
+  user: number | User;
+  readAt: string;
   updatedAt: string;
   createdAt: string;
 }
@@ -2079,6 +2086,7 @@ export interface NotificationsSelect<T extends boolean = true> {
   title?: T;
   message?: T;
   recipient?: T;
+  audience?: T;
   channel?: T;
   isRead?: T;
   readAt?: T;
@@ -2107,9 +2115,9 @@ export interface PushSubscriptionsSelect<T extends boolean = true> {
  * via the `definition` "notification-reads_select".
  */
 export interface NotificationReadsSelect<T extends boolean = true> {
-  user?: T;
   notification?: T;
-  key?: T;
+  user?: T;
+  readAt?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -2570,11 +2578,33 @@ export interface CollectionsWidget {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskBillingProcessRefund".
+ */
+export interface TaskBillingProcessRefund {
+  input: {
+    refundId:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  output: {
+    status?: string | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "TaskBillingRefundSweep".
  */
 export interface TaskBillingRefundSweep {
   input?: unknown;
-  output?: unknown;
+  output: {
+    processed?: number | null;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

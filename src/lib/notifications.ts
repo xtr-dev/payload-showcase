@@ -9,11 +9,12 @@ import { richText, type RichTextValue } from './richtext'
 /**
  * Server-side helpers for the member inbox (@xtr-dev/payload-notifications).
  *
- * The plugin stores a notification with a `recipient` as a personal message and one without a
- * recipient as a broadcast. Its `isRead` flag lives on the notification row, so for a broadcast it
- * would be shared by every member. The site therefore keeps the plugin's `isRead`/`readAt` for
- * personal notifications and records broadcast reads per member in `notification-reads`
- * (see src/plugins/notifications.ts).
+ * The plugin stores a personal message with `audience: 'user'` and a `recipient`, and a broadcast
+ * with `audience: 'broadcast'` and no recipient. When a member reads notifications with their own
+ * access rights, the plugin fills in `isRead`/`readAt` of each broadcast from that member's read
+ * receipts, so `isRead` is always "has this member read it". Members mark notifications read or
+ * unread through the plugin's `POST`/`DELETE /api/notifications/:id/read` endpoint (see
+ * src/components/notifications/ReadButtons.tsx).
  */
 
 /** Channel ids, shared by the plugin config, the users field and the UI. */
@@ -81,9 +82,6 @@ type MessageInput = string | RichTextValue
 const toRichText = (message: MessageInput): RichTextValue =>
   typeof message === 'string' ? richText(...message.split(/\n{2,}/)) : message
 
-const idOf = (value: number | { id: number } | null | undefined): number | null =>
-  value == null ? null : typeof value === 'object' ? value.id : value
-
 export interface NotifyOptions {
   title: string
   /** Plain text (blank lines start a new paragraph) or Lexical rich text. */
@@ -115,6 +113,7 @@ export const notifyMember = (
       message: toRichText(message),
       channel,
       recipient: Number(userId),
+      audience: 'user',
       booking,
       event,
     },
@@ -184,7 +183,7 @@ export const notifyBookingStatus = async (
 
 /**
  * Sends a broadcast to every member who follows `channel`, e.g. "Kiln firing schedule changed".
- * Broadcasts have no recipient; each member's read state is kept in `notification-reads`.
+ * Broadcasts have no recipient; the plugin keeps each member's read state in `notification-reads`.
  */
 export const broadcast = (
   payload: Payload,
@@ -192,7 +191,7 @@ export const broadcast = (
 ): Promise<Notification> =>
   payload.create({
     collection: 'notifications',
-    data: { title, message: toRichText(message), channel },
+    data: { title, message: toRichText(message), channel, audience: 'broadcast' },
     req,
   })
 
@@ -204,7 +203,7 @@ export const inboxWhere = (user: User): Where => {
       { recipient: { equals: user.id } },
       {
         and: [
-          { recipient: { exists: false } },
+          { audience: { equals: 'broadcast' } },
           {
             or: [
               { channel: { exists: false } },
@@ -221,127 +220,38 @@ export interface InboxItem {
   notification: Notification
   /** True for notifications addressed to this member, false for broadcasts. */
   personal: boolean
+  /** Whether this member has read it (for broadcasts: this member, not anyone). */
   read: boolean
 }
 
-/** Ids of the broadcasts this member has marked as read. */
-const readBroadcastIds = async (payload: Payload, user: User): Promise<Set<number>> => {
-  const { docs } = await payload.find({
-    collection: 'notification-reads',
-    where: { user: { equals: user.id } },
-    depth: 0,
-    pagination: false,
-    user,
-    overrideAccess: false,
-  })
-  return new Set(docs.map((r) => idOf(r.notification)).filter((id): id is number => id !== null))
-}
-
 /**
- * The member's inbox, newest first, with per-member read state. Runs with the member's own access
- * rights, so it can never return another member's personal notifications.
+ * The member's inbox, newest first, with their own read state. Runs with the member's own access
+ * rights, so it can never return another member's personal notifications, and the plugin answers
+ * `isRead` of each broadcast for this member.
  */
 export const getInbox = async (
   payload: Payload,
   user: User,
   { limit = 50 }: { limit?: number } = {},
 ): Promise<InboxItem[]> => {
-  const [{ docs }, readBroadcasts] = await Promise.all([
-    payload.find({
-      collection: 'notifications',
-      where: inboxWhere(user),
-      sort: '-createdAt',
-      depth: 0,
-      limit,
-      user,
-      overrideAccess: false,
-    }),
-    readBroadcastIds(payload, user),
-  ])
-  return docs.map((notification) => {
-    const personal = idOf(notification.recipient) !== null
-    return {
-      notification,
-      personal,
-      read: personal ? Boolean(notification.isRead) : readBroadcasts.has(notification.id),
-    }
+  const { docs } = await payload.find({
+    collection: 'notifications',
+    where: inboxWhere(user),
+    sort: '-createdAt',
+    depth: 0,
+    limit,
+    user,
+    overrideAccess: false,
   })
+  return docs.map((notification) => ({
+    notification,
+    personal: notification.audience !== 'broadcast',
+    read: Boolean(notification.isRead),
+  }))
 }
 
 /** Number of unread notifications in the member's inbox (for the header bell). */
 export const countUnread = async (payload: Payload, user: User): Promise<number> => {
   const items = await getInbox(payload, user, { limit: 200 })
   return items.filter((i) => !i.read).length
-}
-
-/**
- * Marks one inbox notification as read for this member. Personal notifications use the plugin's
- * own `isRead`/`readAt` fields (members may only change those two); broadcasts get a read receipt.
- * Returns false when the notification isn't in the member's inbox.
- */
-export const markRead = async (
-  payload: Payload,
-  user: User,
-  notificationId: number,
-): Promise<boolean> => {
-  const { docs } = await payload.find({
-    collection: 'notifications',
-    where: { and: [{ id: { equals: notificationId } }, inboxWhere(user)] },
-    depth: 0,
-    limit: 1,
-    user,
-    overrideAccess: false,
-  })
-  const notification = docs[0]
-  if (!notification) return false
-
-  if (idOf(notification.recipient) !== null) {
-    if (!notification.isRead) {
-      await payload.update({
-        collection: 'notifications',
-        id: notification.id,
-        data: { isRead: true, readAt: new Date().toISOString() },
-        user,
-        overrideAccess: false,
-      })
-    }
-    return true
-  }
-
-  const existing = await payload.count({
-    collection: 'notification-reads',
-    where: { and: [{ user: { equals: user.id } }, { notification: { equals: notification.id } }] },
-    user,
-    overrideAccess: false,
-  })
-  if (existing.totalDocs === 0) {
-    await payload.create({
-      collection: 'notification-reads',
-      data: { user: user.id, notification: notification.id },
-      user,
-      overrideAccess: false,
-    })
-  }
-  return true
-}
-
-/** Marks everything in the member's inbox as read. Returns how many were unread. */
-export const markAllRead = async (payload: Payload, user: User): Promise<number> => {
-  const unread = (await getInbox(payload, user, { limit: 200 })).filter((i) => !i.read)
-  for (const item of unread) await markRead(payload, user, item.notification.id)
-  return unread.length
-}
-
-/** Plain-text excerpt of a notification message, for push bodies and previews. */
-export const messageText = (message: unknown): string => {
-  const walk = (node: unknown): string => {
-    if (!node || typeof node !== 'object') return ''
-    const n = node as { text?: unknown; children?: unknown[]; root?: unknown; type?: string }
-    if (n.root) return walk(n.root)
-    if (typeof n.text === 'string') return n.text
-    if (!Array.isArray(n.children)) return ''
-    const sep = n.type === 'root' || n.type === 'list' ? ' ' : ''
-    return n.children.map(walk).join(sep)
-  }
-  return walk(message).replace(/\s+/g, ' ').trim()
 }

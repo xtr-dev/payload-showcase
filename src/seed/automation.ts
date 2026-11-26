@@ -10,7 +10,7 @@ import type { SeedContext } from './types'
  * `seedWorkflows` option, which creates each one (with its triggers and steps) on boot when no
  * workflow with that slug exists yet, and marks it read-only in the admin panel.
  *
- * Expression rules in payload-automation 0.1.0, which these definitions follow:
+ * Expression rules in payload-automation 0.2.0, which these definitions follow:
  * - A step input value that starts with `{{` is evaluated as one JSONata expression; text around
  *   it is not interpolated, so strings are built with JSONata's `&` operator.
  * - Earlier steps are read as ``steps.`<step name>`.output`` (keyed by the step's name).

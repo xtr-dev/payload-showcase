@@ -18,9 +18,9 @@ import type { SeedContext } from './types'
  * text and links, which the templates need. `{{ }}` and `{% %}` inside text are LiquidJS tags
  * that payload-mailing renders at send time.
  *
- * Links are site-relative (`/account`): Lexical percent-encodes a link URL it doesn't recognise,
- * so `{{ siteUrl }}/account` can't be stored. The plugin's beforeSend hook in
- * src/plugins/mailing.ts makes them absolute when the email goes out.
+ * Custom links start with `{{siteUrl}}`, so emails link to absolute URLs on this site. Lexical
+ * stores such a URL percent-encoded; payload-mailing decodes it before rendering. Keep the braces
+ * free of spaces, since Lexical's link validation rejects them.
  */
 type Inline =
   string | { b: string } | { a: string; href: string } | { a: string; workshop: Workshop }
@@ -115,7 +115,7 @@ const templates = (featured: Workshop | undefined) => [
         ],
       },
       '{% if paid %}Your payment is in, so there is nothing left to do.{% else %}Your booking is waiting for payment. You can pay from My studio.{% endif %}',
-      [{ a: 'View your booking in My studio', href: '/account' }],
+      [{ a: 'View your booking in My studio', href: '{{siteUrl}}/account' }],
       'Wear clothes that can take a little clay. Aprons, tools and tea are on us.',
     ),
     variables: required('firstName', 'workshopTitle', 'sessionDate', 'sessionTime', 'reference'),
@@ -143,7 +143,7 @@ const templates = (featured: Workshop | undefined) => [
         quote:
           'Can’t make it after all? Let us know, and we’ll offer your seat to the waiting list.',
       },
-      [{ a: 'See your booking', href: '/account' }],
+      [{ a: 'See your booking', href: '{{siteUrl}}/account' }],
     ),
     variables: required('firstName', 'workshopTitle', 'sessionDate', 'sessionTime'),
     sampleVariables: { ...sampleBooking, preheader: 'See you tomorrow at Wheel Throwing.' },
@@ -163,9 +163,9 @@ const templates = (featured: Workshop | undefined) => [
         ],
       },
       [
-        { a: 'Browse workshops', href: '/workshops' },
+        { a: 'Browse workshops', href: '{{siteUrl}}/workshops' },
         ' or ',
-        { a: 'see membership plans', href: '/membership' },
+        { a: 'see membership plans', href: '{{siteUrl}}/membership' },
         '.',
       ],
     ),
@@ -193,11 +193,11 @@ const templates = (featured: Workshop | undefined) => [
             '.',
           ]
         : 'Several evening classes still have seats this month.',
-      [{ a: 'See all workshops', href: '/workshops' }],
+      [{ a: 'See all workshops', href: '{{siteUrl}}/workshops' }],
       { quote: 'Open studio is now also on Sunday mornings, 10:00 to 13:00.' },
       [
         'You get this newsletter because you subscribed in My studio. ',
-        { a: 'Unsubscribe or change settings', href: '/account#settings' },
+        { a: 'Unsubscribe or change settings', href: '{{siteUrl}}/account#settings' },
         '.',
       ],
     ),
@@ -217,7 +217,7 @@ const templates = (featured: Workshop | undefined) => [
       { h: 'You’re on the list' },
       'Thanks, {{ firstName }}. Once a month we’ll send you studio notes: new classes, glazes and open-studio hours.',
       '{% if nextIssue != "" %}The next issue goes out on {{ nextIssue | formatDate: "long" }}.{% endif %}',
-      [{ a: 'Change your email settings', href: '/account#settings' }],
+      [{ a: 'Change your email settings', href: '{{siteUrl}}/account#settings' }],
     ),
     variables: required('firstName'),
     sampleVariables: {
