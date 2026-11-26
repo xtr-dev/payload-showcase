@@ -202,7 +202,8 @@ describe('Notifications (payload-notifications)', () => {
       (
         await payload.find({
           collection: 'notifications',
-          where: { booking: { equals: booking.id } },
+          // The Bookings channel only: automation adds its own class-prep tips on another channel.
+          where: { booking: { equals: booking.id }, channel: { equals: 'bookings' } },
           sort: 'createdAt',
           depth: 0,
         })
@@ -235,7 +236,12 @@ describe('Notifications (payload-notifications)', () => {
 
     // The member sees both in their inbox, on the Bookings channel.
     const inbox = await getInbox(payload, await fresh(jonas))
-    expect(inbox.filter((i) => relId(i.notification.booking) === booking.id)).toHaveLength(2)
+    expect(
+      inbox.filter(
+        (i) =>
+          relId(i.notification.booking) === booking.id && i.notification.channel === 'bookings',
+      ),
+    ).toHaveLength(2)
   })
 
   it('sends personal notifications with notifyMember', async () => {

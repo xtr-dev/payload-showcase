@@ -29,6 +29,7 @@
     "@payloadcms/next": "3.94.2",
     "@payloadcms/richtext-lexical": "3.94.2",
     "@payloadcms/ui": "3.94.2",
+    "@xtr-dev/payload-automation": "^0.1.0",
     "@xtr-dev/payload-billing": "^0.4.0",
     "@xtr-dev/payload-feature-flags": "^0.1.0",
     "@xtr-dev/payload-mailing": "^0.7.0",

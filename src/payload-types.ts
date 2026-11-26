@@ -84,6 +84,11 @@ export interface Config {
     'notification-reads': NotificationRead;
     'feature-flags': FeatureFlag;
     'experiment-events': ExperimentEvent;
+    'studio-log': StudioLog;
+    'automation-triggers': AutomationTrigger;
+    'automation-steps': AutomationStep;
+    workflows: Workflow;
+    'workflow-runs': WorkflowRun;
     'payload-kv': PayloadKv;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -109,6 +114,11 @@ export interface Config {
     'notification-reads': NotificationReadsSelect<false> | NotificationReadsSelect<true>;
     'feature-flags': FeatureFlagsSelect<false> | FeatureFlagsSelect<true>;
     'experiment-events': ExperimentEventsSelect<false> | ExperimentEventsSelect<true>;
+    'studio-log': StudioLogSelect<false> | StudioLogSelect<true>;
+    'automation-triggers': AutomationTriggersSelect<false> | AutomationTriggersSelect<true>;
+    'automation-steps': AutomationStepsSelect<false> | AutomationStepsSelect<true>;
+    workflows: WorkflowsSelect<false> | WorkflowsSelect<true>;
+    'workflow-runs': WorkflowRunsSelect<false> | WorkflowRunsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -138,6 +148,12 @@ export interface Config {
     tasks: {
       billingRefundSweep: TaskBillingRefundSweep;
       'process-email': TaskProcessEmail;
+      'http-request-step': TaskHttpRequestStep;
+      'create-document': TaskCreateDocument;
+      'read-document': TaskReadDocument;
+      'update-document': TaskUpdateDocument;
+      'delete-document': TaskDeleteDocument;
+      'send-email': TaskSendEmail;
       inline: {
         input: unknown;
         output: unknown;
@@ -866,7 +882,16 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug: 'inline' | 'billingRefundSweep' | 'process-email';
+        taskSlug:
+          | 'inline'
+          | 'billingRefundSweep'
+          | 'process-email'
+          | 'http-request-step'
+          | 'create-document'
+          | 'read-document'
+          | 'update-document'
+          | 'delete-document'
+          | 'send-email';
         taskID: string;
         input?:
           | {
@@ -899,7 +924,19 @@ export interface PayloadJob {
         id?: string | null;
       }[]
     | null;
-  taskSlug?: ('inline' | 'billingRefundSweep' | 'process-email') | null;
+  taskSlug?:
+    | (
+        | 'inline'
+        | 'billingRefundSweep'
+        | 'process-email'
+        | 'http-request-step'
+        | 'create-document'
+        | 'read-document'
+        | 'update-document'
+        | 'delete-document'
+        | 'send-email'
+      )
+    | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -911,6 +948,472 @@ export interface PayloadJob {
     | string
     | number
     | boolean
+    | null;
+  /**
+   * Workflow that created this job
+   */
+  automationWorkflow?: (number | null) | Workflow;
+  /**
+   * Workflow run that created this job
+   */
+  automationWorkflowRun?: (number | null) | WorkflowRun;
+  /**
+   * Trigger that initiated the workflow
+   */
+  automationTrigger?: (number | null) | AutomationTrigger;
+  /**
+   * Name of the workflow step that created this job
+   */
+  automationStepName?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Create and manage automated workflows.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "workflows".
+ */
+export interface Workflow {
+  id: number;
+  /**
+   * Human-readable name for the workflow
+   */
+  name: string;
+  /**
+   * URL-safe unique identifier for this workflow
+   */
+  slug?: string | null;
+  /**
+   * Read-only workflows cannot be edited or deleted. This is typically used for seeded template workflows.
+   */
+  readOnly?: boolean | null;
+  /**
+   * Optional description of what this workflow does
+   */
+  description?: string | null;
+  /**
+   * Enable or disable this workflow
+   */
+  enabled?: boolean | null;
+  /**
+   * Triggers that can start this workflow. Uses OR logic - workflow runs if ANY trigger fires.
+   */
+  triggers?: (number | AutomationTrigger)[] | null;
+  /**
+   * Steps to execute when this workflow runs. Steps execute in order based on dependencies.
+   */
+  steps?:
+    | {
+        /**
+         * Select a step from the step library
+         */
+        step: number | AutomationStep;
+        /**
+         * Unique identifier for this step within the workflow. Used for dependencies.
+         */
+        slug: string;
+        /**
+         * Override the step name for this workflow instance (optional)
+         */
+        stepName?: string | null;
+        /**
+         * Override step configuration values for this workflow. Merged with step defaults.
+         */
+        inputOverrides?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        /**
+         * JSONata expression that must evaluate to true for this step to execute. Leave empty to always run. Example: trigger.operation = "create"
+         */
+        condition?: string | null;
+        /**
+         * Steps that must complete before this step can run. Reference steps by their slug.
+         */
+        dependencies?:
+          | {
+              /**
+               * Slug of the dependent step
+               */
+              slug: string;
+              id?: string | null;
+            }[]
+          | null;
+        /**
+         * Position in the visual workflow builder
+         *
+         * @minItems 2
+         * @maxItems 2
+         */
+        position?: [number, number] | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * How to handle step failures
+   */
+  errorHandling?: ('stop' | 'continue' | 'retry') | null;
+  /**
+   * Maximum number of retry attempts
+   */
+  maxRetries?: number | null;
+  /**
+   * Delay between retries in milliseconds
+   */
+  retryDelay?: number | null;
+  /**
+   * Maximum execution time in milliseconds (0 for no timeout)
+   */
+  timeout?: number | null;
+  updatedAt: string;
+  createdAt: string;
+  _status?: ('draft' | 'published') | null;
+}
+/**
+ * Reusable trigger definitions that can be shared across workflows.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "automation-triggers".
+ */
+export interface AutomationTrigger {
+  id: number;
+  /**
+   * Human-readable name for this trigger
+   */
+  name: string;
+  /**
+   * Optional description of when this trigger fires
+   */
+  description?: string | null;
+  /**
+   * The type of event that will fire this trigger
+   */
+  type: 'collection-hook' | 'global-hook' | 'scheduled' | 'webhook' | 'manual';
+  /**
+   * The target of this trigger
+   */
+  target?: string | null;
+  /**
+   * The collection to watch for events
+   */
+  collectionSlug?: 'bookings' | null;
+  /**
+   * The specific hook event to listen for
+   */
+  hook?:
+    | (
+        | 'afterChange'
+        | 'afterDelete'
+        | 'afterRead'
+        | 'beforeValidate'
+        | 'beforeChange'
+        | 'beforeDelete'
+        | 'beforeRead'
+        | 'afterLogin'
+        | 'afterLogout'
+        | 'beforeLogin'
+        | 'afterForgotPassword'
+        | 'afterRefresh'
+        | 'afterMe'
+        | 'beforeOperation'
+        | 'afterOperation'
+        | 'afterError'
+      )
+    | null;
+  /**
+   * The global to watch for events
+   */
+  globalSlug?: 'site-settings' | null;
+  /**
+   * Cron expression (e.g., "0 9 * * *" for 9 AM daily)
+   */
+  schedule?: string | null;
+  /**
+   * Single path segment for this webhook. The endpoint is served at POST /api/automation/webhooks/<path>
+   */
+  webhookPath?: string | null;
+  /**
+   * Shared secret the caller must send in the X-Webhook-Secret header (or as an Authorization bearer token). Only a hash is stored: the secret is never shown again after saving. Leave empty to keep the current secret; enter a new one to rotate it.
+   */
+  webhookSecret?: string | null;
+  webhookSecretHash?: string | null;
+  /**
+   * JSONata expression that must evaluate to true for this trigger to fire. Leave empty to always fire. Example: trigger.doc._status = "published"
+   */
+  condition?: string | null;
+  /**
+   * Human-readable explanation of the condition (for documentation)
+   */
+  conditionDescription?: string | null;
+  /**
+   * Number of workflows using this trigger
+   */
+  usageCount?: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Reusable step templates that can be used across workflows.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "automation-steps".
+ */
+export interface AutomationStep {
+  id: number;
+  /**
+   * Human-readable name for this step
+   */
+  name: string;
+  /**
+   * Optional description of what this step does
+   */
+  description?: string | null;
+  /**
+   * The type of action this step performs
+   */
+  type:
+    'http-request-step' | 'create-document' | 'read-document' | 'update-document' | 'delete-document' | 'send-email';
+  /**
+   * Step configuration in JSON format. String values can use JSONata expressions for dynamic data (e.g., "trigger.doc.id")
+   */
+  config?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Color for the step node in the visual builder (hex code)
+   */
+  color?: string | null;
+  /**
+   * Icon name for the step (optional)
+   */
+  icon?: string | null;
+  /**
+   * Optional JSON schema for validating step inputs
+   */
+  inputValidation?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Retry this step if it fails
+   */
+  retryOnFailure?: boolean | null;
+  /**
+   * Maximum number of retry attempts
+   */
+  maxRetries?: number | null;
+  /**
+   * Delay between retries in milliseconds
+   */
+  retryDelay?: number | null;
+  /**
+   * Number of workflows using this step
+   */
+  usageCount?: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "workflow-runs".
+ */
+export interface WorkflowRun {
+  id: number;
+  /**
+   * Reference to the workflow that was executed
+   */
+  workflow: number | Workflow;
+  /**
+   * Version of the workflow that was executed
+   */
+  workflowVersion?: number | null;
+  /**
+   * The trigger that initiated this workflow run
+   */
+  firedTrigger?: (number | null) | AutomationTrigger;
+  /**
+   * Snapshot of the trigger context when the workflow was fired
+   */
+  triggerData?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Current execution status
+   */
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  /**
+   * When execution began
+   */
+  startedAt: string;
+  /**
+   * When execution finished
+   */
+  completedAt?: string | null;
+  /**
+   * Total execution time in milliseconds
+   */
+  duration?: number | null;
+  /**
+   * Detailed results for each step execution
+   */
+  stepResults?:
+    | {
+        /**
+         * Reference to the step that was executed
+         */
+        step?: (number | null) | AutomationStep;
+        /**
+         * Name of the step at execution time
+         */
+        stepName?: string | null;
+        /**
+         * Position of the step in the workflow
+         */
+        stepIndex?: number | null;
+        /**
+         * Step execution status
+         */
+        status?: ('pending' | 'running' | 'succeeded' | 'failed' | 'skipped') | null;
+        /**
+         * When this step started
+         */
+        startedAt?: string | null;
+        /**
+         * When this step completed
+         */
+        completedAt?: string | null;
+        /**
+         * Step execution time in milliseconds
+         */
+        duration?: number | null;
+        /**
+         * Input data passed to this step (after template resolution)
+         */
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        /**
+         * Output data returned by this step
+         */
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        /**
+         * Error message if this step failed
+         */
+        error?: string | null;
+        /**
+         * Number of retry attempts for this step
+         */
+        retryCount?: number | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Full execution context including trigger data and step outputs
+   */
+  context?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Input data provided when the workflow was triggered
+   */
+  inputs?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Final output data from completed steps
+   */
+  outputs?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * User, system, or trigger type that initiated execution
+   */
+  triggeredBy: string;
+  /**
+   * Error message if workflow execution failed
+   */
+  error?: string | null;
+  /**
+   * Detailed execution logs
+   */
+  logs?:
+    | {
+        timestamp?: string | null;
+        level?: ('debug' | 'info' | 'warn' | 'error') | null;
+        message?: string | null;
+        /**
+         * Index of the step that generated this log (optional)
+         */
+        stepIndex?: number | null;
+        /**
+         * Additional data for this log entry
+         */
+        data?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
     | null;
   updatedAt: string;
   createdAt: string;
@@ -1114,6 +1617,28 @@ export interface ExperimentEvent {
   createdAt: string;
 }
 /**
+ * Written by the automation workflows. Shown publicly on /showcase#automation.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "studio-log".
+ */
+export interface StudioLog {
+  id: number;
+  title: string;
+  /**
+   * Public text: keep member names, emails and references out of it.
+   */
+  message?: string | null;
+  source: 'booking' | 'webhook' | 'settings' | 'manual';
+  severity: 'info' | 'warning';
+  /**
+   * The booking this entry is about, if any.
+   */
+  booking?: (number | null) | Booking;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
@@ -1204,6 +1729,26 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'experiment-events';
         value: number | ExperimentEvent;
+      } | null)
+    | ({
+        relationTo: 'studio-log';
+        value: number | StudioLog;
+      } | null)
+    | ({
+        relationTo: 'automation-triggers';
+        value: number | AutomationTrigger;
+      } | null)
+    | ({
+        relationTo: 'automation-steps';
+        value: number | AutomationStep;
+      } | null)
+    | ({
+        relationTo: 'workflows';
+        value: number | Workflow;
+      } | null)
+    | ({
+        relationTo: 'workflow-runs';
+        value: number | WorkflowRun;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -1609,6 +2154,143 @@ export interface ExperimentEventsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "studio-log_select".
+ */
+export interface StudioLogSelect<T extends boolean = true> {
+  title?: T;
+  message?: T;
+  source?: T;
+  severity?: T;
+  booking?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "automation-triggers_select".
+ */
+export interface AutomationTriggersSelect<T extends boolean = true> {
+  name?: T;
+  description?: T;
+  type?: T;
+  target?: T;
+  collectionSlug?: T;
+  hook?: T;
+  globalSlug?: T;
+  schedule?: T;
+  webhookPath?: T;
+  webhookSecret?: T;
+  webhookSecretHash?: T;
+  condition?: T;
+  conditionDescription?: T;
+  usageCount?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "automation-steps_select".
+ */
+export interface AutomationStepsSelect<T extends boolean = true> {
+  name?: T;
+  description?: T;
+  type?: T;
+  config?: T;
+  color?: T;
+  icon?: T;
+  inputValidation?: T;
+  retryOnFailure?: T;
+  maxRetries?: T;
+  retryDelay?: T;
+  usageCount?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "workflows_select".
+ */
+export interface WorkflowsSelect<T extends boolean = true> {
+  name?: T;
+  slug?: T;
+  readOnly?: T;
+  description?: T;
+  enabled?: T;
+  triggers?: T;
+  steps?:
+    | T
+    | {
+        step?: T;
+        slug?: T;
+        stepName?: T;
+        inputOverrides?: T;
+        condition?: T;
+        dependencies?:
+          | T
+          | {
+              slug?: T;
+              id?: T;
+            };
+        position?: T;
+        id?: T;
+      };
+  errorHandling?: T;
+  maxRetries?: T;
+  retryDelay?: T;
+  timeout?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  _status?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "workflow-runs_select".
+ */
+export interface WorkflowRunsSelect<T extends boolean = true> {
+  workflow?: T;
+  workflowVersion?: T;
+  firedTrigger?: T;
+  triggerData?: T;
+  status?: T;
+  startedAt?: T;
+  completedAt?: T;
+  duration?: T;
+  stepResults?:
+    | T
+    | {
+        step?: T;
+        stepName?: T;
+        stepIndex?: T;
+        status?: T;
+        startedAt?: T;
+        completedAt?: T;
+        duration?: T;
+        input?: T;
+        output?: T;
+        error?: T;
+        retryCount?: T;
+        id?: T;
+      };
+  context?: T;
+  inputs?: T;
+  outputs?: T;
+  triggeredBy?: T;
+  error?: T;
+  logs?:
+    | T
+    | {
+        timestamp?: T;
+        level?: T;
+        message?: T;
+        stepIndex?: T;
+        data?: T;
+        id?: T;
+      };
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
@@ -1644,6 +2326,10 @@ export interface PayloadJobsSelect<T extends boolean = true> {
   waitUntil?: T;
   processing?: T;
   meta?: T;
+  automationWorkflow?: T;
+  automationWorkflowRun?: T;
+  automationTrigger?: T;
+  automationStepName?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -1905,6 +2591,384 @@ export interface TaskProcessEmail {
     success?: boolean | null;
     emailId?: string | null;
     status?: string | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskHttp-request-step".
+ */
+export interface TaskHttpRequestStep {
+  input: {
+    /**
+     * The URL to make the HTTP request to
+     */
+    url: string;
+    /**
+     * HTTP method to use
+     */
+    method?: ('GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH') | null;
+    /**
+     * HTTP headers as JSON object (e.g., {"Content-Type": "application/json"})
+     */
+    headers?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Request body data. Use JSONPath to reference values (e.g., {"postId": "$.trigger.doc.id", "title": "$.trigger.doc.title"})
+     */
+    body?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Request timeout in milliseconds (default: 30000)
+     */
+    timeout?: number | null;
+    authentication?: {
+      /**
+       * Authentication method
+       */
+      type?: ('none' | 'bearer' | 'basic' | 'apikey') | null;
+      /**
+       * Bearer token value
+       */
+      token?: string | null;
+      /**
+       * Basic auth username
+       */
+      username?: string | null;
+      /**
+       * Basic auth password
+       */
+      password?: string | null;
+      /**
+       * API key header name (e.g., "X-API-Key")
+       */
+      headerName?: string | null;
+      /**
+       * API key value
+       */
+      headerValue?: string | null;
+    };
+    /**
+     * Number of retry attempts on failure (max: 5)
+     */
+    retries?: number | null;
+    /**
+     * Delay between retries in milliseconds
+     */
+    retryDelay?: number | null;
+  };
+  output: {
+    /**
+     * HTTP status code
+     */
+    status?: number | null;
+    /**
+     * HTTP status text
+     */
+    statusText?: string | null;
+    /**
+     * Response headers
+     */
+    headers?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Response body
+     */
+    body?: string | null;
+    /**
+     * Parsed response data (if JSON)
+     */
+    data?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Request duration in milliseconds
+     */
+    duration?: number | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskCreate-document".
+ */
+export interface TaskCreateDocument {
+  input: {
+    /**
+     * The collection slug to create a document in
+     */
+    collectionSlug: string;
+    /**
+     * The document data to create. Use JSONPath to reference trigger data (e.g., {"title": "$.trigger.doc.title", "author": "$.trigger.doc.author"})
+     */
+    data:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Create as draft (if collection has drafts enabled)
+     */
+    draft?: boolean | null;
+    /**
+     * Locale for the document (if localization is enabled)
+     */
+    locale?: string | null;
+  };
+  output: {
+    /**
+     * The created document
+     */
+    doc?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * The ID of the created document
+     */
+    id?: string | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskRead-document".
+ */
+export interface TaskReadDocument {
+  input: {
+    /**
+     * The collection slug to read from
+     */
+    collectionSlug: string;
+    /**
+     * The ID of a specific document to read. Use JSONPath (e.g., "$.trigger.doc.relatedId"). Leave empty to find multiple.
+     */
+    id?: string | null;
+    /**
+     * Query conditions to find documents when ID is not provided. Use JSONPath in values (e.g., {"category": "$.trigger.doc.category", "status": "published"})
+     */
+    where?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Maximum number of documents to return (default: 10)
+     */
+    limit?: number | null;
+    /**
+     * Field to sort by (prefix with - for descending order)
+     */
+    sort?: string | null;
+    /**
+     * Locale for the document (if localization is enabled)
+     */
+    locale?: string | null;
+    /**
+     * Depth of relationships to populate (0-10)
+     */
+    depth?: number | null;
+  };
+  output: {
+    /**
+     * The document(s) found
+     */
+    doc?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Total number of documents matching the query
+     */
+    totalDocs?: number | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskUpdate-document".
+ */
+export interface TaskUpdateDocument {
+  input: {
+    /**
+     * The collection slug to update a document in
+     */
+    collectionSlug: string;
+    /**
+     * The ID of the document to update. Use JSONPath to reference IDs (e.g., "$.trigger.doc.id" or "$.steps.previousStep.output.id")
+     */
+    id: string;
+    /**
+     * The data to update the document with. Use JSONPath to reference values (e.g., {"status": "$.trigger.doc.status", "updatedBy": "$.trigger.user.id"})
+     */
+    data:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Update as draft (if collection has drafts enabled)
+     */
+    draft?: boolean | null;
+    /**
+     * Locale for the document (if localization is enabled)
+     */
+    locale?: string | null;
+  };
+  output: {
+    /**
+     * The updated document
+     */
+    doc?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * The ID of the updated document
+     */
+    id?: string | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskDelete-document".
+ */
+export interface TaskDeleteDocument {
+  input: {
+    /**
+     * The collection slug to delete from
+     */
+    collectionSlug: string;
+    /**
+     * The ID of a specific document to delete. Use JSONPath (e.g., "$.trigger.doc.id"). Leave empty to delete multiple.
+     */
+    id?: string | null;
+    /**
+     * Query conditions to find documents to delete when ID is not provided. Use JSONPath in values (e.g., {"author": "$.trigger.doc.author"})
+     */
+    where?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  output: {
+    /**
+     * The deleted document(s)
+     */
+    doc?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Number of documents deleted
+     */
+    deletedCount?: number | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskSend-email".
+ */
+export interface TaskSendEmail {
+  input: {
+    /**
+     * Recipient email address. Use JSONPath for dynamic values (e.g., "$.trigger.doc.email" or "$.trigger.user.email")
+     */
+    to: string;
+    /**
+     * Sender email address. Use JSONPath if needed (e.g., "$.trigger.doc.senderEmail"). Uses default if not provided.
+     */
+    from?: string | null;
+    /**
+     * Email subject line. Can include JSONPath references (e.g., "Order #$.trigger.doc.orderNumber received")
+     */
+    subject: string;
+    /**
+     * Plain text email content. Use JSONPath to include dynamic content (e.g., "Dear $.trigger.doc.customerName, your order #$.trigger.doc.id has been received.")
+     */
+    text?: string | null;
+    /**
+     * HTML email content. Use JSONPath for dynamic values (e.g., "<h1>Order #$.trigger.doc.orderNumber</h1>")
+     */
+    html?: string | null;
+    /**
+     * CC recipients
+     */
+    cc?: string[] | null;
+    /**
+     * BCC recipients
+     */
+    bcc?: string[] | null;
+  };
+  output: {
+    /**
+     * Email message ID from the mail server
+     */
+    messageId?: string | null;
+    /**
+     * Response from the mail server
+     */
+    response?: string | null;
   };
 }
 /**
