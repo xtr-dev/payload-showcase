@@ -138,7 +138,7 @@ export const seedNotifications = async (
   if (jonas) {
     await payload.create({
       collection: 'notification-reads',
-      data: { user: jonas.id, notification: firing.id },
+      data: { user: jonas.id, notification: firing.id, readAt: hoursAgo(20) },
       overrideAccess: true,
     })
   }

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import type { Where } from 'payload'
 
 import { Alert, Card } from '@/components/ui'
-import { absoluteLinks, TEMPLATES } from '@/lib/mailing'
+import { TEMPLATES } from '@/lib/mailing'
 import { isMailCaptured, MAIL_OUTBOX_SLUG } from '@/lib/mailOutbox'
 import { getPayloadClient } from '@/lib/payload'
 
@@ -98,7 +98,7 @@ export const MailingShowcase = async () => {
             <iframe
               title="Booking confirmation email preview"
               sandbox=""
-              srcDoc={absoluteLinks(preview.rendered.html, 'html')}
+              srcDoc={preview.rendered.html}
               className="h-[520px] w-full bg-paper"
             />
           </Card>

@@ -63,13 +63,19 @@ test.describe('Billing (payload-billing)', () => {
     await registerMember(page, 'Pim Draaischijf')
     await bookWorkshop(page, 'glaze-lab')
     await payOnTestProvider(page, 'declined-payment')
-    await expect(page.locator('#status')).toContainText('failed', { timeout: 15_000 })
 
-    // Back on the site, the booking still holds its seat and can be paid again.
+    // The test provider sends the visitor back to the site's return page after a decline too.
+    await page.waitForURL(/\/checkout\/return\?t=[0-9a-f]{32}$/, { timeout: 20_000 })
+    await expect(page.getByTestId('checkout-heading')).toHaveText('Your payment didn’t go through')
+    await expect(page.getByTestId('checkout-result')).toContainText('Declined')
+    await expect(page.getByTestId('checkout-result')).toContainText('Your seat stays reserved')
+
+    // The account lists the declined payment; the booking still holds its seat and is paid again
+    // from the return page.
     await page.goto('/account')
-    const payments = page.getByTestId('payments')
-    await expect(payments).toContainText('Declined')
-    await payments.getByRole('button', { name: 'Try again' }).click()
+    await expect(page.getByTestId('payments')).toContainText('Declined')
+    await page.goBack()
+    await page.getByRole('button', { name: 'Try again' }).click()
     await page.waitForURL(/\/api\/payload-billing\/test\/payment\/test_pay_/)
     await payOnTestProvider(page, 'instant-success')
     await page.waitForURL(/\/checkout\/return/, { timeout: 20_000 })
@@ -113,6 +119,16 @@ test.describe('Billing (payload-billing)', () => {
     await expect(page.getByTestId('payments').getByRole('listitem').first()).toContainText(
       'Refunded',
     )
+  })
+
+  test('a cancelled payment also returns to the site', async ({ page }) => {
+    await registerMember(page, 'Kees Kleiduif')
+    await bookWorkshop(page, 'mugs-handles')
+    await payOnTestProvider(page, 'cancelled-payment')
+    await page.waitForURL(/\/checkout\/return\?t=[0-9a-f]{32}$/, { timeout: 20_000 })
+    await expect(page.getByTestId('checkout-heading')).toHaveText('Your payment didn’t go through')
+    await expect(page.getByTestId('checkout-result')).toContainText('Cancelled')
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
   })
 
   test('a seeded member sees their payment history and can pay an open booking', async ({

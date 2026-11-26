@@ -106,13 +106,14 @@ describe('templates', () => {
     expect(out.html).toContain('See you at the wheel, Ada &lt;script&gt;')
     expect(out.html).not.toContain('<script>')
     expect(out.html).toContain('Kiln &amp; Co.')
-    expect(out.html).toContain('href="/account"')
+    // `{{siteUrl}}` in a link URL is rendered like any other variable.
+    expect(out.html).toContain('href="https://kiln.example/account"')
     expect(out.html).toContain('Price: €65.00')
     expect(out.html).toContain('Your payment is in')
     expect(out.html).not.toContain('waiting for payment')
     // The plain-text part keeps values verbatim and shows links as text.
     expect(out.text).toContain('See you at the wheel, Ada <script>')
-    expect(out.text).toContain('View your booking in My studio (/account)')
+    expect(out.text).toContain('View your booking in My studio (https://kiln.example/account)')
     expect(out.text).toContain('Manage your email settings: https://kiln.example/account#settings')
 
     const unpaid = await renderTemplate(payload, TEMPLATES.bookingConfirmation, {
@@ -213,9 +214,8 @@ describe('booking emails', () => {
     expect(captured.subject).toBe(sent.subject)
     expect(captured.from).toBe('"Kiln & Co." <hello@kiln.test>')
     expect(captured.html).toContain(booking.reference)
-    // beforeSend made the template's site-relative links absolute on the way out.
+    // The template's `{{siteUrl}}` links are absolute URLs on this site.
     expect(captured.html).toContain('href="http://localhost:3000/account"')
-    expect(captured.html).not.toContain('href="/account"')
     expect(captured.text).toContain('(http://localhost:3000/account)')
   })
 
@@ -284,10 +284,16 @@ describe('newsletter', () => {
 
     const [issue] = await newsletterFor(jonas)
     expect(issue.scheduledAt).toBe(maraIssue.scheduledAt)
-    // `processImmediately`: the confirmation is captured without running the job queue.
+    // `processImmediately`: the confirmation is captured without running the job queue, although
+    // it is queued on the plugin's `mail` queue rather than Payload's `default` one.
     const [latest] = await outboxFor(jonas.email)
     expect(latest.subject).toBe('You’re on the list, Jonas')
     expect(latest.html).toContain('The next issue goes out on')
+    const [subscribed] = await emailsWhere({
+      recipient: { equals: jonas.id },
+      templateSlug: { equals: TEMPLATES.newsletterSubscribed },
+    })
+    expect(subscribed.status).toBe('sent')
   })
 
   it('respects an opt-out: the scheduled issue is never delivered', async () => {

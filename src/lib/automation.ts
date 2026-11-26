@@ -100,9 +100,9 @@ export const getStudioLog = async (payload: Payload, limit = 8): Promise<StudioL
 /**
  * Runs the "Studio digest" workflow through its manual trigger and returns the finished run.
  *
- * payload-automation 0.1.0 can only start manual triggers from server code
- * (`triggerWorkflowById`), so this is the one place that does it. Only admins may: the run
- * counts every booking and emails the result to the user who asked.
+ * payload-automation starts manual triggers from server code (`triggerWorkflowById`), so this is
+ * the one place that does it. Only admins may: the run counts every booking and emails the result
+ * to the user who asked.
  */
 export const runStudioDigest = async (
   payload: Payload,
@@ -121,35 +121,19 @@ export const runStudioDigest = async (
   if (!workflow) throw new Error('The studio digest workflow has not been seeded yet.')
 
   const req = await createLocalReq({ user: { ...user, collection: 'users' } }, payload)
-  let runId: number | string | undefined
-  try {
-    const result = await triggerWorkflowById(
-      payload,
-      String(workflow.id),
-      'manual',
-      { sendTo: user.email, requestedAt: new Date().toISOString() },
-      req,
-    )
-    runId = result.runId
-  } catch (error) {
-    // A failing step makes triggerWorkflowById throw without the run id, but the run is still
-    // recorded (as failed), so fall back to this workflow's latest run.
-    payload.logger.warn({ err: error }, 'Studio digest run failed')
+  // A failing step resolves with status 'failed' and the failed run's id; only problems before a
+  // run exists (e.g. the workflow is disabled) throw.
+  const result = await triggerWorkflowById(
+    payload,
+    String(workflow.id),
+    'manual',
+    { sendTo: user.email, requestedAt: new Date().toISOString() },
+    req,
+  )
+  if (result.status === 'failed') {
+    payload.logger.warn({ err: result.error, runId: result.runId }, 'Studio digest run failed')
   }
-
-  if (runId === undefined) {
-    const latest = await payload.find({
-      collection: 'workflow-runs',
-      where: { workflow: { equals: workflow.id } },
-      sort: '-createdAt',
-      limit: 1,
-      depth: 0,
-      overrideAccess: true,
-    })
-    runId = latest.docs[0]?.id
-  }
-  const summary =
-    runId === undefined ? null : await getRunSummary(payload, runId, { includeErrors: true })
+  const summary = await getRunSummary(payload, result.runId, { includeErrors: true })
   if (!summary) throw new Error('The studio digest did not record a run.')
   return summary
 }

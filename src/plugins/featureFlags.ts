@@ -104,9 +104,6 @@ export const featureFlags: Plugin[] = [
     // Cache the RSC helpers across requests (Next.js unstable_cache). The plugin clears the cache
     // when a flag is changed in the admin.
     cache: true,
-    // Show the plugin's dashboard as the collection's list view. The standalone
-    // /admin/feature-flags-overview view always shows "Authentication Required" in 0.1.0.
-    enableCustomListView: true,
     collectionOverrides: {
       access: { read: isAdmin, create: isAdmin, update: isAdmin, delete: isAdmin },
       admin: { group: 'Experiments' },

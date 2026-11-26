@@ -18,10 +18,10 @@ await notifyMember(payload, booking.member, {
 /** Showcase for @xtr-dev/payload-notifications: the latest studio broadcasts, live. */
 export const NotificationsShowcase = async () => {
   const payload = await getPayloadClient()
-  // Broadcasts only (no recipient): personal notifications never leave the member's own inbox.
+  // Broadcasts only: personal notifications never leave the member's own inbox.
   const { docs: broadcasts } = await payload.find({
     collection: 'notifications',
-    where: { recipient: { exists: false } },
+    where: { audience: { equals: 'broadcast' } },
     sort: '-createdAt',
     depth: 0,
     limit: 2,
@@ -110,11 +110,13 @@ export const NotificationsShowcase = async () => {
           </pre>
         </div>
 
-        <Alert tone="info" title="A plugin limitation, and how the site handles it">
-          The plugin keeps one <code className="font-mono">isRead</code> flag per notification, so a
-          broadcast read by one member would look read to everyone. Kiln &amp; Co. uses that flag
-          for personal notifications only and stores broadcast reads per member in a small{' '}
-          <code className="font-mono">notification-reads</code> collection.
+        <Alert tone="info" title="Read state per member">
+          A broadcast is one notification shown to every member, so the plugin keeps its read state
+          per member in <code className="font-mono">notification-reads</code> and answers{' '}
+          <code className="font-mono">isRead</code> for whoever is asking. The inbox marks
+          notifications read and unread through the plugin’s <code className="font-mono">POST</code>
+          /<code className="font-mono">DELETE</code>{' '}
+          <code className="font-mono">/api/notifications/:id/read</code> endpoint.
         </Alert>
       </div>
     </ShowcaseSection>

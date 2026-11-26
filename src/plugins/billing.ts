@@ -1,8 +1,6 @@
 import {
   billingPlugin,
-  processPendingRefunds,
   refundPayment,
-  syncOpenRefunds,
   testProvider,
   type PaymentProvider,
 } from '@xtr-dev/payload-billing'
@@ -15,7 +13,6 @@ import type {
   Endpoint,
   JobsConfig,
   Plugin,
-  TaskConfig,
 } from 'payload'
 
 import { getUser, isAdmin, isAdminField, isAdminUser } from '@/access'
@@ -256,32 +253,23 @@ const refundBookingEndpoint: Endpoint = {
   },
 }
 
-/**
- * Sends refunds that were only reserved (e.g. created by hand in the Refunds collection) to the
- * provider and polls the provider for refunds still in flight. Runs every minute.
- */
-const refundSweepTask: TaskConfig = {
-  slug: 'billingRefundSweep',
-  label: 'Billing: process pending refunds',
-  schedule: [{ cron: '* * * * *', queue: 'billing' }],
-  handler: async ({ req }) => {
-    const processed = await processPendingRefunds(req.payload)
-    await syncOpenRefunds(req.payload)
-    return { output: { processed: processed.length } }
-  },
-}
+/** Jobs queue of the plugin's refund tasks (see `refundJobs` below). */
+const BILLING_QUEUE = 'billing'
 
-/** Adds the refund sweep to `config.jobs` without dropping other plugins' tasks or crons. */
+/**
+ * Runs the billing queue every minute, without dropping other plugins' crons. The plugin's
+ * `refundJobs` registers the tasks (sending one admin-created refund, and the refund sweep on its
+ * own schedule); the host has to run their queue.
+ */
 const billingJobs: Plugin = (config) => {
   const jobs: JobsConfig = config.jobs ?? {}
   const autoRun = jobs.autoRun
-  const ours = [{ cron: '* * * * *', queue: 'billing' }]
+  const ours = [{ cron: '* * * * *', queue: BILLING_QUEUE }]
   const otherShouldAutoRun = jobs.shouldAutoRun
   return {
     ...config,
     jobs: {
       ...jobs,
-      tasks: [...(jobs.tasks ?? []), refundSweepTask],
       autoRun:
         typeof autoRun === 'function'
           ? async (payload) => [...(await autoRun(payload)), ...ours]
@@ -301,6 +289,10 @@ export const billing: Plugin[] = [
     // Fills the invoice's customer block from the member, so invoices stay correct as a record
     // even if the member later changes their name or email.
     customerInfoExtractor: (customer: User) => ({ name: customer.name, email: customer.email }),
+    // Refunds created by hand (Billing → Refunds → Create) are only reservations; with this the
+    // plugin queues a job that sends each one to the provider, plus a sweep every five minutes for
+    // refunds left pending or still processing at the provider.
+    refundJobs: { queue: BILLING_QUEUE },
     collections: {
       payments: { access: { read: ownOrAdmin('member'), ...writeAccess }, extend: extendPayments },
       invoices: { access: { read: ownOrAdmin('customer'), ...writeAccess } },

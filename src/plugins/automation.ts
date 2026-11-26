@@ -9,18 +9,10 @@ import {
   UpdateDocumentStepTask,
   workflowsPlugin,
 } from '@xtr-dev/payload-automation/server'
-import type {
-  CollectionAfterChangeHook,
-  CollectionConfig,
-  Endpoint,
-  Payload,
-  Plugin,
-} from 'payload'
+import type { CollectionConfig, Endpoint, Plugin } from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
 import { automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
-
-import { extendCollection } from './utils'
 
 /**
  * @xtr-dev/payload-automation
@@ -135,69 +127,6 @@ const studioLogPlugin: Plugin = (config) => ({
 })
 
 /**
- * Deletes completed jobs that no workflow run is waiting on: every other plugin's (mailing,
- * billing, ...) finished jobs. Together with `keepStepJobsPlugin` this restores Payload's default
- * clean-up for everything except automation's step jobs. Uses the database adapter directly, the
- * same way Payload deletes completed jobs when `jobs.runHooks` is off.
- */
-export const deleteCompletedNonWorkflowJobs = async (payload: Payload): Promise<void> => {
-  await payload.db.deleteMany({
-    collection: 'payload-jobs',
-    where: {
-      and: [{ completedAt: { exists: true } }, { automationWorkflowRun: { exists: false } }],
-    },
-  })
-}
-
-/**
- * Keeps finished jobs until their workflow run has read them.
- *
- * The plugin runs each step as a Payload job and reads the step's output back from the job
- * afterwards. With Payload's default `deleteJobOnComplete: true` the job is already gone by then,
- * so every `steps.<name>.output` would be empty. Payload only has this setting for all jobs, so:
- * - step jobs are deleted by `deleteStepJobsWhenRunEnds` once their run has finished;
- * - other plugins' completed jobs are deleted on every job-runner tick, by wrapping the
- *   `shouldAutoRun` chain that mailing and billing set up (their result is passed through).
- * Other `jobs` settings (tasks, autoRun crons) are kept as they are.
- */
-const keepStepJobsPlugin: Plugin = (config) => {
-  const jobs = config.jobs ?? {}
-  const previousShouldAutoRun = jobs.shouldAutoRun
-  return {
-    ...config,
-    jobs: {
-      ...jobs,
-      tasks: jobs.tasks ?? [],
-      deleteJobOnComplete: false,
-      shouldAutoRun: async (payload) => {
-        try {
-          await deleteCompletedNonWorkflowJobs(payload)
-        } catch (error) {
-          payload.logger.warn({ err: error, msg: 'Could not clean up completed jobs' })
-        }
-        return previousShouldAutoRun ? previousShouldAutoRun(payload) : true
-      },
-    },
-  }
-}
-
-const FINISHED_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
-
-/** Deletes a run's step jobs once the run has finished, since `keepStepJobsPlugin` keeps them. */
-const deleteStepJobsWhenRunEnds: CollectionAfterChangeHook = async ({ doc, previousDoc, req }) => {
-  if (!FINISHED_RUN_STATUSES.has(doc.status) || FINISHED_RUN_STATUSES.has(previousDoc?.status)) {
-    return doc
-  }
-  await req.payload.delete({
-    collection: 'payload-jobs',
-    where: { automationWorkflowRun: { equals: doc.id } },
-    overrideAccess: true,
-    req,
-  })
-  return doc
-}
-
-/**
  * Points the kiln alert workflow's HTTP step at this site's mock pager, unless
  * PUBLIC_KILN_PAGER_URL is set. Runs in onInit, which Next.js reaches on the first request, after
  * it has stored the port it listens on in `PORT`. The workflow reads the value at run time through
@@ -221,7 +150,6 @@ const pagerUrlPlugin: Plugin = (config) => {
 
 export const automation: Plugin[] = [
   studioLogPlugin,
-  keepStepJobsPlugin,
   pagerUrlPlugin,
   workflowsPlugin({
     collectionTriggers: { bookings: { afterChange: true } },
@@ -239,11 +167,4 @@ export const automation: Plugin[] = [
     // the stored trigger snapshot.
     stripUserData: true,
   }),
-  extendCollection('workflow-runs', (collection) => ({
-    ...collection,
-    hooks: {
-      ...collection.hooks,
-      afterChange: [...(collection.hooks?.afterChange ?? []), deleteStepJobsWhenRunEnds],
-    },
-  })),
 ]

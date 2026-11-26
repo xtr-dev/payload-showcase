@@ -30,33 +30,12 @@ export const TEMPLATES = {
  */
 export const MAIL_QUEUES = { default: 'mail', priority: 'mail-priority' } as const
 
-/**
- * Queue for sends with `processImmediately`. payload-mailing 0.7.0 runs the immediate job with
- * `payload.jobs.run({ where: { id } })`, which only looks in Payload's `default` queue, so a job
- * on any other queue silently stays queued. Immediate sends therefore use `default`.
- */
-const IMMEDIATE_QUEUE = 'default'
-
-/** The queue option for a send: the given queue, or `default` when it is delivered right away. */
-const queueFor = (queue: string | undefined, processImmediately: boolean) =>
-  processImmediately ? IMMEDIATE_QUEUE : queue
-
 /** How long before a session its reminder is sent. */
 export const REMINDER_LEAD_MS = 24 * 60 * 60 * 1000
 
 /** Public origin used for links in emails. */
 export const siteUrl = (): string =>
   (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000').replace(/\/+$/, '')
-
-/**
- * Turns site-relative links (`href="/account"` in HTML, `(/account)` in the plain-text part)
- * into absolute URLs. Template links are stored relative because Lexical percent-encodes a
- * `{{ siteUrl }}` placeholder in a link URL.
- */
-export const absoluteLinks = (body: string, part: 'html' | 'text'): string =>
-  part === 'html'
-    ? body.replace(/href="\/(?!\/)/g, `href="${siteUrl()}/`)
-    : body.replace(/\((\/(?!\/)[^)\s]*)\)/g, `(${siteUrl()}$1)`)
 
 /** Variables every template and the Kiln & Co. layout rely on. */
 const baseVariables = (preheader: string) => ({ siteUrl: siteUrl(), preheader })
@@ -123,8 +102,9 @@ const bookingVariables = ({ booking, member, session, workshop }: BookingParts) 
 
 /**
  * Sends the booking confirmation for a booking, rendered from the `booking-confirmation`
- * template. The bookings hook in src/plugins/mailing.ts calls it when a booking becomes `paid`. The send goes to the `mail-priority` queue with priority 1, so it is delivered
- * before newsletters and reminders. Returns the queued `emails` document.
+ * template. The bookings hook in src/plugins/mailing.ts calls it when a booking becomes `paid`.
+ * The send goes to the `mail-priority` queue with priority 1, so it is delivered before newsletters
+ * and reminders. Returns the queued `emails` document.
  */
 export const sendBookingConfirmation = async (
   payload: Payload,
@@ -146,7 +126,7 @@ export const sendBookingConfirmation = async (
       booking: parts.booking.id,
       recipient: parts.member.id,
     },
-    queue: queueFor(MAIL_QUEUES.priority, processImmediately),
+    queue: MAIL_QUEUES.priority,
     processImmediately,
   })
 }
@@ -202,7 +182,6 @@ export const sendWelcomeEmail = async (
 ): Promise<Email> =>
   sendEmail<Email>(payload, {
     processImmediately,
-    queue: queueFor(undefined, processImmediately),
     template: {
       slug: TEMPLATES.welcome,
       variables: {
@@ -318,7 +297,6 @@ export const applyNewsletterChange = async (payload: Payload, user: User): Promi
     },
     data: { to: [user.email], recipient: user.id },
     processImmediately: true,
-    queue: queueFor(undefined, true),
   })
 }
 

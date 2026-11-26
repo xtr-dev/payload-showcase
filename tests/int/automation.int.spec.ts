@@ -132,22 +132,16 @@ describe('wiring', () => {
         'send-email',
       ]),
     )
-    // Step outputs are read back from the step's job, so finished jobs must be kept.
-    expect(payload.config.jobs.deleteJobOnComplete).toBe(false)
+    // The plugin captures step outputs itself, so Payload's default job clean-up stays on.
+    expect(payload.config.jobs.deleteJobOnComplete).not.toBe(false)
   })
 
-  it("still clears other plugins' completed jobs on each job-runner tick", async () => {
-    // Any task outside a workflow run, e.g. a mailing or billing job, behaves the same.
+  it('leaves completed jobs to Payload, which deletes them', async () => {
     const job = await payload.jobs.queue({
       task: 'read-document',
       input: { collectionSlug: 'workshops', limit: 1 },
     })
     await payload.jobs.runByID({ id: job.id })
-    const kept = await payload.findByID({ collection: 'payload-jobs', id: job.id })
-    expect(kept.completedAt).toBeTruthy()
-
-    // Tests switch the cron off (DISABLE_JOBS_AUTORUN), but the clean-up still runs first.
-    expect(await payload.config.jobs.shouldAutoRun?.(payload)).toBe(false)
     const left = await payload.count({
       collection: 'payload-jobs',
       where: { id: { equals: job.id } },
@@ -248,7 +242,7 @@ describe('Booking confirmed (collection hook)', () => {
     expect(entry.message).not.toContain(mara.name)
     expect(entry.message).not.toContain(booking.reference)
 
-    // The step jobs kept for their output are cleaned up once the run has finished.
+    // Payload deletes the finished step jobs; the run keeps their outputs.
     const jobs = await payload.count({
       collection: 'payload-jobs',
       where: { automationWorkflowRun: { equals: run.id } },
@@ -457,5 +451,32 @@ describe('run history', () => {
     expect((await payload.count({ collection: 'studio-log' })).totalDocs).toBe(0)
     // The workflows are code and survive the reset.
     expect((await payload.count({ collection: 'workflows' })).totalDocs).toBe(4)
+  })
+})
+
+// Runs last: these add runs and studio log entries that the run history tests above don't expect.
+describe('Studio digest failures', () => {
+  it('returns the failed run when a step fails', async () => {
+    vi.spyOn(payload, 'sendEmail').mockRejectedValue(new Error('SMTP is down'))
+    const before = await runsOf(WORKFLOW_SLUGS.studioDigest)
+
+    const summary = await runStudioDigest(payload, ctx.admin)
+    expect(summary.status).toBe('failed')
+    expect(summary.workflowSlug).toBe(WORKFLOW_SLUGS.studioDigest)
+    expect(summary.steps.some((s) => s.status === 'failed')).toBe(true)
+    // It is this run, not an older one.
+    expect(before.map((r) => r.id)).not.toContain(summary.id)
+  })
+
+  it('refuses to run the digest while the workflow is disabled', async () => {
+    const id = await workflowId(WORKFLOW_SLUGS.studioDigest)
+    const before = (await runsOf(WORKFLOW_SLUGS.studioDigest)).length
+    await payload.update({ collection: 'workflows', id, data: { enabled: false } })
+    try {
+      await expect(runStudioDigest(payload, ctx.admin)).rejects.toThrow(/disabled/)
+      expect(await runsOf(WORKFLOW_SLUGS.studioDigest)).toHaveLength(before)
+    } finally {
+      await payload.update({ collection: 'workflows', id, data: { enabled: true } })
+    }
   })
 })

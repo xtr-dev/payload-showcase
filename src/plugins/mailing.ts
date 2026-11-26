@@ -13,7 +13,6 @@ import type {
 import { getUser, isAdmin, isAdminUser } from '@/access'
 import { kilnEmailLayout } from '@/lib/emailLayout'
 import {
-  absoluteLinks,
   applyNewsletterChange,
   cancelPendingBookingEmails,
   MAIL_QUEUES,
@@ -273,11 +272,6 @@ const memberEmails: CollectionAfterChangeHook<User> = async ({
   return doc
 }
 
-const relId = (value: unknown): number | string | undefined => {
-  if (value && typeof value === 'object' && 'id' in value) return (value as { id: number }).id
-  return typeof value === 'number' || typeof value === 'string' ? value : undefined
-}
-
 const staffOnly = { read: isAdmin, create: isAdmin, update: isAdmin, delete: isAdmin }
 
 export const mailing: Plugin[] = [
@@ -315,12 +309,9 @@ export const mailing: Plugin[] = [
       }
       return null
     },
-    // Runs just before delivery: makes the templates' site-relative links absolute, and gives
-    // newsletter emails the standard List-Unsubscribe header.
+    // Runs just before delivery: gives newsletter emails the standard List-Unsubscribe header.
     beforeSend: (options, email) => ({
       ...options,
-      html: typeof options.html === 'string' ? absoluteLinks(options.html, 'html') : options.html,
-      text: typeof options.text === 'string' ? absoluteLinks(options.text, 'text') : options.text,
       headers:
         email.templateSlug === TEMPLATES.newsletter
           ? {
@@ -356,31 +347,6 @@ export const mailing: Plugin[] = [
     },
   }),
   withMailJobRunner,
-  // payload-mailing 0.7.0 fills `templateSlug` only when the template id is a string, so with
-  // SQLite's numeric ids it stays empty. This hook runs after the plugin's and fills it in.
-  extendCollection('emails', (collection) => ({
-    ...collection,
-    hooks: {
-      ...collection.hooks,
-      beforeChange: [
-        ...(collection.hooks?.beforeChange ?? []),
-        async ({ data, req }) => {
-          const templateId = relId(data.template)
-          if (templateId !== undefined && !data.templateSlug) {
-            const template = await req.payload.findByID({
-              collection: 'email-templates',
-              id: templateId,
-              depth: 0,
-              overrideAccess: true,
-              req,
-            })
-            data.templateSlug = template.slug
-          }
-          return data
-        },
-      ],
-    },
-  })),
   addFields('users', [
     {
       name: 'newsletter',

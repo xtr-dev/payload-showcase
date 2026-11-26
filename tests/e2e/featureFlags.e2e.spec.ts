@@ -104,6 +104,21 @@ test.describe('FeatureFlags (payload-feature-flags)', () => {
     expect((await page.context().cookies()).some((c) => c.name === HERO_PREVIEW_COOKIE)).toBe(false)
   })
 
+  test('shows the plugin dashboard at /admin/feature-flags-overview to an admin', async ({
+    page,
+  }) => {
+    await page.goto('/admin/login')
+    await page.getByLabel('Email').fill(USERS.admin.email)
+    await page.getByLabel('Password').fill(USERS.admin.password)
+    await page.getByRole('button', { name: 'Login' }).click()
+    await page.waitForURL(/\/admin$/)
+
+    const res = await page.goto('/admin/feature-flags-overview')
+    expect(res?.status()).toBe(200)
+    await expect(page.getByText('new-booking-flow').first()).toBeVisible()
+    await expect(page.getByText('Authentication Required')).toHaveCount(0)
+  })
+
   test.describe('gift cards', () => {
     test('appear and disappear with the gift-cards flag', async ({ page, playwright, baseURL }) => {
       const api = await adminApi(await playwright.request.newContext({ baseURL }))
