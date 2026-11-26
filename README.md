@@ -34,13 +34,13 @@ Mara has an active membership and two bookings; Jonas has one. `pnpm seed` refus
 
 ## How each plugin is showcased
 
-| Plugin                                                                               | On the site                                                                                                                                                    |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@xtr-dev/payload-billing`](https://github.com/xtr-dev/payload-billing)             | Checkout for workshop bookings and memberships (local test provider by default, Stripe/Mollie via env), payments, invoices and refunds.                        |
-| [`@xtr-dev/payload-mailing`](https://github.com/xtr-dev/payload-mailing)             | Booking confirmation and reminder emails from templates, and a scheduled newsletter. Mail is captured in development.                                          |
-| [`@xtr-dev/payload-notifications`](https://github.com/xtr-dev/payload-notifications) | An in-app inbox in the account area, studio-news channels and optional web push.                                                                               |
-| [`@xtr-dev/payload-feature-flags`](https://github.com/xtr-dev/payload-feature-flags) | An A/B test on the homepage hero, gated gift cards and a rollout of the new booking flow.                                                                      |
-| [`@xtr-dev/payload-automation`](https://github.com/xtr-dev/payload-automation)       | Code-defined workflows: booking paid → confirmation email + studio log, a kiln-alert webhook, opening-hours changes and an admin-run digest, with run history. |
+| Plugin                                                                               | On the site                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@xtr-dev/payload-billing`](https://github.com/xtr-dev/payload-billing)             | Checkout for workshop bookings and memberships (local test provider by default, Stripe/Mollie via env), payments, invoices and refunds.                                                     |
+| [`@xtr-dev/payload-mailing`](https://github.com/xtr-dev/payload-mailing)             | Booking confirmation, reminder and welcome emails from templates, and a scheduled newsletter. Mail is captured and shown on `/mailbox`.                                                     |
+| [`@xtr-dev/payload-notifications`](https://github.com/xtr-dev/payload-notifications) | An in-app inbox in the account area, studio-news channels and optional web push.                                                                                                            |
+| [`@xtr-dev/payload-feature-flags`](https://github.com/xtr-dev/payload-feature-flags) | An A/B test on the homepage hero, gated gift cards and a rollout of the new booking flow.                                                                                                   |
+| [`@xtr-dev/payload-automation`](https://github.com/xtr-dev/payload-automation)       | Code-defined workflows: booking paid → studio log + aftercare follow-up, a kiln-alert webhook that broadcasts studio news, opening-hours changes and an admin-run digest, with run history. |
 
 The `/showcase` page explains each one. The plugins are being wired in one at a time; until then
 their spots show a placeholder.
@@ -56,6 +56,7 @@ their spots show a placeholder.
 | `pnpm test:e2e`                                   | Playwright against a production build on a freshly seeded database in `.e2e/` (port 3100)              |
 | `pnpm test`                                       | Both test suites                                                                                       |
 | `pnpm generate:types` / `pnpm generate:importmap` | Regenerate `src/payload-types.ts` / the admin import map                                               |
+| `pnpm generate:vapid`                             | Print a VAPID key pair for optional web push (paste into `.env`)                                       |
 
 The first `pnpm test:e2e` builds the app; set `E2E_SKIP_BUILD=1` to reuse an existing build.
 Run `pnpm exec playwright install chromium` once beforehand.

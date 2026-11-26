@@ -86,6 +86,11 @@ export const WorkflowCard = ({ workflow }: { workflow: SeedWorkflow }) => {
               >
                 <span className="font-semibold text-ink">{step.name}</span>{' '}
                 <span className="text-ink-soft">({STEP_TYPE_LABELS[step.type] ?? step.type})</span>
+                {step.condition && (
+                  <span className="block font-mono text-[0.7rem] break-words text-ink-soft">
+                    only if {step.condition}
+                  </span>
+                )}
               </span>
             ))}
             {batch.length > 1 && <span className="text-xs text-ink-soft">in parallel</span>}

@@ -1,7 +1,13 @@
 import http from 'http'
 import type { AddressInfo } from 'net'
 
-import { createLocalReq, type Endpoint, type Payload, type PayloadRequest } from 'payload'
+import {
+  createLocalReq,
+  type Endpoint,
+  type Payload,
+  type PayloadRequest,
+  type Where,
+} from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getRecentRuns, runStudioDigest } from '@/lib/automation'
@@ -51,6 +57,11 @@ const runsOf = async (slug: string): Promise<WorkflowRun[]> => {
   })
   return docs
 }
+
+/** Mailing's confirmation emails for the booking under test. */
+let confirmationEmails: () => Promise<number>
+/** Notifications about the booking under test that match `where`. */
+let bookingNotifications: (where: Where) => Promise<number>
 
 const latestLogEntry = async () =>
   (await payload.find({ collection: 'studio-log', sort: '-createdAt', limit: 1, depth: 0 })).docs[0]
@@ -125,6 +136,25 @@ describe('wiring', () => {
     expect(payload.config.jobs.deleteJobOnComplete).toBe(false)
   })
 
+  it("still clears other plugins' completed jobs on each job-runner tick", async () => {
+    // Any task outside a workflow run, e.g. a mailing or billing job, behaves the same.
+    const job = await payload.jobs.queue({
+      task: 'read-document',
+      input: { collectionSlug: 'workshops', limit: 1 },
+    })
+    await payload.jobs.runByID({ id: job.id })
+    const kept = await payload.findByID({ collection: 'payload-jobs', id: job.id })
+    expect(kept.completedAt).toBeTruthy()
+
+    // Tests switch the cron off (DISABLE_JOBS_AUTORUN), but the clean-up still runs first.
+    expect(await payload.config.jobs.shouldAutoRun?.(payload)).toBe(false)
+    const left = await payload.count({
+      collection: 'payload-jobs',
+      where: { id: { equals: job.id } },
+    })
+    expect(left.totalDocs).toBe(0)
+  })
+
   it('keeps seeded workflows locked through the API, even for admins', async () => {
     await expect(
       payload.update({
@@ -143,6 +173,25 @@ describe('Booking confirmed (collection hook)', () => {
 
   beforeAll(async () => {
     booking = ctx.bookings.find((b) => relId(b.member) === mara.id && b.status === 'pending')!
+    confirmationEmails = async () =>
+      (
+        await payload.count({
+          collection: 'emails',
+          where: {
+            and: [
+              { booking: { equals: booking.id } },
+              { templateSlug: { equals: 'booking-confirmation' } },
+            ],
+          },
+        })
+      ).totalDocs
+    bookingNotifications = async (where) =>
+      (
+        await payload.count({
+          collection: 'notifications',
+          where: { and: [{ booking: { equals: booking.id } }, where] },
+        })
+      ).totalDocs
   })
 
   it('does not run while the booking stays pending', async () => {
@@ -160,25 +209,41 @@ describe('Booking confirmed (collection hook)', () => {
     expect(run.status).toBe('completed')
     expect(run.stepResults?.map((s) => [s.stepName, s.status])).toEqual([
       ['Read session', 'succeeded'],
-      ['Read member', 'succeeded'],
       ['Read workshop', 'succeeded'],
-      ['Email confirmation', 'succeeded'],
+      ['Find confirmation email', 'succeeded'],
+      ['Find confirmation notification', 'succeeded'],
+      ['Find earlier tips', 'succeeded'],
+      ['Send what-to-bring tips', 'succeeded'],
       ['Write studio log', 'succeeded'],
     ])
+
+    // The workflow sends no email of its own: mailing's single confirmation is the only one.
+    expect(sendEmail).not.toHaveBeenCalled()
+    expect(await confirmationEmails()).toBe(1)
+    expect(await bookingNotifications({ event: { equals: 'booking-confirmed' } })).toBe(1)
 
     // Later steps used the earlier steps' outputs (JSONata over steps.<name>.output).
     const session = ctx.sessions.find((s) => s.id === relId(booking.session))!
     const workshop = ctx.workshops.find((w) => w.id === relId(session.workshop))!
-    expect(sendEmail).toHaveBeenCalledTimes(1)
-    const email = sendEmail.mock.calls[0][0] as { to: string; subject: string; text: string }
-    expect(email.to).toBe(mara.email)
-    expect(email.subject).toBe(`Your seat in ${workshop.title} is confirmed`)
-    expect(email.text).toContain(booking.reference)
+    const { docs: tips } = await payload.find({
+      collection: 'notifications',
+      where: {
+        and: [{ booking: { equals: booking.id } }, { channel: { equals: 'class-reminders' } }],
+      },
+      depth: 0,
+    })
+    expect(tips).toHaveLength(1)
+    expect(tips[0].title).toBe(`Getting ready for ${workshop.title}`)
+    expect(relId(tips[0].recipient)).toBe(mara.id)
+    expect(JSON.stringify(tips[0].message)).toContain('Your class starts ')
 
     const entry = await latestLogEntry()
     expect(entry.title).toBe(`Seat confirmed: ${workshop.title}`)
     expect(entry.source).toBe('booking')
     expect(relId(entry.booking)).toBe(booking.id)
+    expect(entry.message).toContain('Confirmation email: queued by mailing.')
+    expect(entry.message).toContain('Inbox message: sent by notifications.')
+    expect(entry.message).toContain('What-to-bring tips: sent.')
     // The public message names no member and no booking reference.
     expect(entry.message).not.toContain(mara.name)
     expect(entry.message).not.toContain(booking.reference)
@@ -195,6 +260,20 @@ describe('Booking confirmed (collection hook)', () => {
     await payload.update({ collection: 'bookings', id: booking.id, data: { notes: 'Bring apron' } })
     await payload.update({ collection: 'bookings', id: booking.id, data: { status: 'cancelled' } })
     expect(await runsOf(WORKFLOW_SLUGS.bookingConfirmed)).toHaveLength(1)
+  })
+
+  it('skips the tips when a booking is paid a second time, and duplicates nothing', async () => {
+    await payload.update({ collection: 'bookings', id: booking.id, data: { status: 'paid' } })
+    const [run] = await runsOf(WORKFLOW_SLUGS.bookingConfirmed)
+    expect(run.status).toBe('completed')
+    expect(run.stepResults?.find((s) => s.stepName === 'Send what-to-bring tips')?.status).toBe(
+      'skipped',
+    )
+    expect((await latestLogEntry()).message).toContain('What-to-bring tips: already sent earlier.')
+
+    expect(await confirmationEmails()).toBe(1)
+    expect(await bookingNotifications({ event: { equals: 'booking-confirmed' } })).toBe(1)
+    expect(await bookingNotifications({ channel: { equals: 'class-reminders' } })).toBe(1)
   })
 })
 
@@ -227,7 +306,18 @@ describe('Kiln temperature alert (webhook)', () => {
     expect(pagerCalls).toEqual([alert])
     const [run] = await runsOf(WORKFLOW_SLUGS.kilnAlert)
     expect(run.status).toBe('completed')
-    expect(run.stepResults?.map((s) => s.status)).toEqual(['succeeded', 'succeeded'])
+    expect(run.stepResults?.map((s) => s.status)).toEqual(['succeeded', 'succeeded', 'succeeded'])
+
+    // A Studio news broadcast (no recipient) through the notifications collection.
+    const { docs: news } = await payload.find({
+      collection: 'notifications',
+      where: { channel: { equals: 'studio-news' } },
+      sort: '-createdAt',
+      limit: 1,
+      depth: 0,
+    })
+    expect(news[0]?.title).toBe('Kiln update: Big Bertha is running hot')
+    expect(news[0]?.recipient ?? null).toBeNull()
 
     const entry = await latestLogEntry()
     expect(entry.title).toBe(`Kiln alert: Big Bertha at ${alert.temperatureC} °C`)
@@ -329,7 +419,7 @@ describe('run history', () => {
       user: ctx.admin,
       overrideAccess: false,
     })
-    expect(asAdmin.totalDocs).toBe(4)
+    expect(asAdmin.totalDocs).toBe(5)
   })
 
   it('summarises runs for the public without trigger data, step data or errors', async () => {
@@ -338,6 +428,7 @@ describe('run history', () => {
       WORKFLOW_SLUGS.studioDigest,
       WORKFLOW_SLUGS.openingHours,
       WORKFLOW_SLUGS.kilnAlert,
+      WORKFLOW_SLUGS.bookingConfirmed,
       WORKFLOW_SLUGS.bookingConfirmed,
     ])
     const serialized = JSON.stringify(runs)
@@ -348,7 +439,7 @@ describe('run history', () => {
 
   it('lets the public read the studio log but not which booking an entry is about', async () => {
     const { docs } = await payload.find({ collection: 'studio-log', overrideAccess: false })
-    expect(docs.length).toBe(4)
+    expect(docs.length).toBe(5)
     expect(docs.every((d) => d.booking === undefined)).toBe(true)
     await expect(
       payload.create({

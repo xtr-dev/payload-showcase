@@ -9,7 +9,13 @@ import {
   UpdateDocumentStepTask,
   workflowsPlugin,
 } from '@xtr-dev/payload-automation/server'
-import type { CollectionAfterChangeHook, CollectionConfig, Endpoint, Plugin } from 'payload'
+import type {
+  CollectionAfterChangeHook,
+  CollectionConfig,
+  Endpoint,
+  Payload,
+  Plugin,
+} from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
 import { automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
@@ -129,17 +135,51 @@ const studioLogPlugin: Plugin = (config) => ({
 })
 
 /**
+ * Deletes completed jobs that no workflow run is waiting on: every other plugin's (mailing,
+ * billing, ...) finished jobs. Together with `keepStepJobsPlugin` this restores Payload's default
+ * clean-up for everything except automation's step jobs. Uses the database adapter directly, the
+ * same way Payload deletes completed jobs when `jobs.runHooks` is off.
+ */
+export const deleteCompletedNonWorkflowJobs = async (payload: Payload): Promise<void> => {
+  await payload.db.deleteMany({
+    collection: 'payload-jobs',
+    where: {
+      and: [{ completedAt: { exists: true } }, { automationWorkflowRun: { exists: false } }],
+    },
+  })
+}
+
+/**
  * Keeps finished jobs until their workflow run has read them.
  *
  * The plugin runs each step as a Payload job and reads the step's output back from the job
  * afterwards. With Payload's default `deleteJobOnComplete: true` the job is already gone by then,
- * so every `steps.<name>.output` would be empty. Other plugins' `jobs` settings are kept; the
- * step jobs are deleted by `deleteStepJobsWhenRunEnds` once their run has finished.
+ * so every `steps.<name>.output` would be empty. Payload only has this setting for all jobs, so:
+ * - step jobs are deleted by `deleteStepJobsWhenRunEnds` once their run has finished;
+ * - other plugins' completed jobs are deleted on every job-runner tick, by wrapping the
+ *   `shouldAutoRun` chain that mailing and billing set up (their result is passed through).
+ * Other `jobs` settings (tasks, autoRun crons) are kept as they are.
  */
-const keepStepJobsPlugin: Plugin = (config) => ({
-  ...config,
-  jobs: { ...config.jobs, tasks: config.jobs?.tasks ?? [], deleteJobOnComplete: false },
-})
+const keepStepJobsPlugin: Plugin = (config) => {
+  const jobs = config.jobs ?? {}
+  const previousShouldAutoRun = jobs.shouldAutoRun
+  return {
+    ...config,
+    jobs: {
+      ...jobs,
+      tasks: jobs.tasks ?? [],
+      deleteJobOnComplete: false,
+      shouldAutoRun: async (payload) => {
+        try {
+          await deleteCompletedNonWorkflowJobs(payload)
+        } catch (error) {
+          payload.logger.warn({ err: error, msg: 'Could not clean up completed jobs' })
+        }
+        return previousShouldAutoRun ? previousShouldAutoRun(payload) : true
+      },
+    },
+  }
+}
 
 const FINISHED_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 

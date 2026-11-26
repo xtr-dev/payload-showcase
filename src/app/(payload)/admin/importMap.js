@@ -21,6 +21,9 @@ import { StrikethroughFeatureClient as StrikethroughFeatureClient_e70f5e05f09f93
 import { UnderlineFeatureClient as UnderlineFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
+import { RefundBookingButton as RefundBookingButton_2c250197aaef497d637a5f2834208d3d } from '@/components/billing/RefundBookingButton'
+import { TemplatePreview as TemplatePreview_8442af03cc3fb2889e04ee32939a8fc6 } from '@xtr-dev/payload-mailing/client'
+import { FeatureFlagsView as FeatureFlagsView_c5c5a656893a6ab675488aed54b5ea6e } from '@xtr-dev/payload-feature-flags/views'
 import { ReadOnlyBanner as ReadOnlyBanner_6f365a93b6cb4b34ad564b391e21db6f } from '@xtr-dev/payload-automation/client'
 import { StatusCell as StatusCell_6f365a93b6cb4b34ad564b391e21db6f } from '@xtr-dev/payload-automation/client'
 import { ErrorDisplay as ErrorDisplay_6f365a93b6cb4b34ad564b391e21db6f } from '@xtr-dev/payload-automation/client'
@@ -51,6 +54,9 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#UnderlineFeatureClient": UnderlineFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#BoldFeatureClient": BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
+  "@/components/billing/RefundBookingButton#RefundBookingButton": RefundBookingButton_2c250197aaef497d637a5f2834208d3d,
+  "@xtr-dev/payload-mailing/client#TemplatePreview": TemplatePreview_8442af03cc3fb2889e04ee32939a8fc6,
+  "@xtr-dev/payload-feature-flags/views#FeatureFlagsView": FeatureFlagsView_c5c5a656893a6ab675488aed54b5ea6e,
   "@xtr-dev/payload-automation/client#ReadOnlyBanner": ReadOnlyBanner_6f365a93b6cb4b34ad564b391e21db6f,
   "@xtr-dev/payload-automation/client#StatusCell": StatusCell_6f365a93b6cb4b34ad564b391e21db6f,
   "@xtr-dev/payload-automation/client#ErrorDisplay": ErrorDisplay_6f365a93b6cb4b34ad564b391e21db6f,

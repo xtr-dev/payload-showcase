@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test'
 import { registerMember, signIn, USERS } from '../helpers/e2e'
 
 test.describe('home', () => {
-  test('renders the hero, featured workshops and testimonials', async ({ page }) => {
+  test('renders the hero, featured workshops and testimonials', async ({ page, baseURL }) => {
+    // Pin the homepage hero A/B test to the control variant (see src/lib/experiments.ts).
+    await page.context().addCookies([{ name: 'kiln_preview_home-hero', value: 'a', url: baseURL! }])
     await page.goto('/')
     await expect(page).toHaveTitle(/Kiln & Co\./)
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Get your hands in the clay.')
@@ -95,8 +97,9 @@ test.describe('accounts', () => {
     await expect(page.getByRole('heading', { name: 'Booking for Pim Jansen' })).toBeVisible()
     await page.getByRole('button', { name: /Reserve seat/ }).click()
 
-    await page.waitForURL(/\/account\?booked=KC-/)
-    await expect(page.getByText('Seat reserved')).toBeVisible()
+    // Checkout (payload-billing) sends the visitor to the payment page; the seat is held meanwhile.
+    await page.waitForURL(/\/api\/payload-billing\/test\/payment\//)
+    await page.goto('/account')
     const bookings = page.getByTestId('bookings')
     await expect(bookings.getByRole('listitem')).toHaveCount(1)
     await expect(bookings).toContainText('Awaiting payment')

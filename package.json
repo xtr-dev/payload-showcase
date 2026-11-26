@@ -13,6 +13,7 @@
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "generate:types": "cross-env NODE_OPTIONS=--no-deprecation payload generate:types",
     "generate:importmap": "cross-env NODE_OPTIONS=--no-deprecation payload generate:importmap",
+    "generate:vapid": "node scripts/generate-vapid-keys.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
@@ -22,19 +23,27 @@
     "e2e:server": "bash scripts/e2e-server.sh"
   },
   "dependencies": {
+    "@mollie/api-client": "^4.6.0",
     "@payloadcms/db-sqlite": "3.94.2",
+    "@payloadcms/email-nodemailer": "3.94.2",
     "@payloadcms/next": "3.94.2",
     "@payloadcms/richtext-lexical": "3.94.2",
     "@payloadcms/ui": "3.94.2",
     "@xtr-dev/payload-automation": "^0.1.0",
+    "@xtr-dev/payload-billing": "^0.4.0",
+    "@xtr-dev/payload-feature-flags": "^0.1.0",
+    "@xtr-dev/payload-mailing": "^0.7.0",
+    "@xtr-dev/payload-notifications": "^0.1.0",
     "cross-env": "^7.0.3",
     "dotenv": "16.4.7",
     "graphql": "^16.8.1",
+    "liquidjs": "^10.30.1",
     "next": "16.4.6",
     "payload": "3.94.2",
     "react": "19.2.9",
     "react-dom": "19.2.9",
-    "sharp": "0.35.4"
+    "sharp": "0.35.4",
+    "stripe": "^22.6.2"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

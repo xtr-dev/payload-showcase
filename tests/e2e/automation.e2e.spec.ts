@@ -25,12 +25,17 @@ test.describe('Automation (payload-automation)', () => {
   test('an admin confirms a booking and the run shows up in the history', async ({ page }) => {
     await signIn(page, USERS.admin, '/showcase')
 
-    const res = await page.request.get(
-      '/api/bookings?where[status][equals]=pending&limit=1&depth=0',
-    )
-    const { docs } = (await res.json()) as { docs: Array<{ id: number }> }
-    expect(docs.length).toBe(1)
-    const bookingId = docs[0].id
+    // A booking of the admin's own, so the seeded members' bookings (which the billing spec
+    // pays) stay untouched. Admins may create bookings through the REST API.
+    const me = (await (await page.request.get('/api/users/me')).json()) as { user: { id: number } }
+    const sessions = (await (
+      await page.request.get('/api/sessions?sort=-startsAt&limit=1&depth=0')
+    ).json()) as { docs: Array<{ id: number }> }
+    const created = await page.request.post('/api/bookings', {
+      data: { session: sessions.docs[0].id, member: me.user.id, status: 'pending' },
+    })
+    expect(created.status()).toBe(201)
+    const bookingId = ((await created.json()) as { doc: { id: number } }).doc.id
 
     await page.goto(`/admin/collections/bookings/${bookingId}`)
     await page.locator('#field-status .rs__control').click()
@@ -42,11 +47,22 @@ test.describe('Automation (payload-automation)', () => {
     const run = page.locator('[data-testid="workflow-run"][data-workflow="booking-confirmed"]')
     await expect(run.first()).toBeVisible()
     await expect(run.first().getByText('Completed')).toBeVisible()
-    await expect(run.first().getByText('Email confirmation · ok')).toBeVisible()
+    await expect(run.first().getByText('Send what-to-bring tips · ok')).toBeVisible()
     await expect(run.first().getByText('Write studio log · ok')).toBeVisible()
 
     await page.goto('/showcase#automation')
-    await expect(page.getByTestId('studio-log').getByText(/^Seat confirmed: /).first()).toBeVisible()
+    await expect(
+      page
+        .getByTestId('studio-log')
+        .getByText(/^Seat confirmed: /)
+        .first(),
+    ).toBeVisible()
+    await expect(
+      page
+        .getByTestId('studio-log')
+        .getByText(/Confirmation email: queued by mailing\./)
+        .first(),
+    ).toBeVisible()
 
     // The full run, with its trigger data and step outputs, is in the admin panel.
     await page.goto('/admin/collections/workflow-runs')
@@ -67,7 +83,9 @@ test.describe('Automation (payload-automation)', () => {
     expect((await ok.json()).workflows).toEqual([expect.objectContaining({ status: 'triggered' })])
 
     await page.goto('/showcase#automation')
-    const entry = page.getByTestId('studio-log').locator('li', { hasText: 'Kiln alert: Big Bertha' })
+    const entry = page
+      .getByTestId('studio-log')
+      .locator('li', { hasText: 'Kiln alert: Big Bertha' })
     await expect(entry.first()).toBeVisible()
     // The HTTP step reached the site's mock pager and its answer made it into the log.
     await expect(entry.first()).toContainText('Paged Ines (kiln technician) (ticket PG-')

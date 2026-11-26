@@ -1,9 +1,59 @@
-import { PluginPlaceholder } from '@/components/PluginPlaceholder'
+import { PushToggle } from '@/components/notifications/PushToggle'
+import { saveNotificationChannels } from '@/components/notifications/actions'
+import { Button } from '@/components/ui'
+import { CHANNELS, followedChannels, pushChannelsFor, vapidKeys } from '@/lib/notifications'
 import type { User } from '@/payload-types'
 
-/** Web push opt-in and notification channel preferences. Phase 2 (notifications) owns this file. */
-export const PushSetting = async (_props: { user: User }) => (
-  <PluginPlaceholder plugin="@xtr-dev/payload-notifications">
-    Get class reminders as push notifications on this device.
-  </PluginPlaceholder>
-)
+/**
+ * Notification channel preferences and the web push opt-in for this device. Push only appears
+ * when the server has VAPID keys; without them the inbox works and this explains why push is off.
+ */
+export const PushSetting = async ({ user }: { user: User }) => {
+  const followed = followedChannels(user)
+  const keys = vapidKeys()
+
+  return (
+    <div className="space-y-5" data-testid="notification-settings">
+      <form action={saveNotificationChannels}>
+        <fieldset>
+          <legend className="font-semibold text-ink">Notification channels</legend>
+          <ul className="mt-2 space-y-2">
+            {CHANNELS.map((c) => (
+              <li key={c.id}>
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    name="channel"
+                    value={c.id}
+                    defaultChecked={!c.optional || followed.includes(c.id)}
+                    disabled={!c.optional}
+                    className="mt-0.5 size-4 accent-clay"
+                  />
+                  <span>
+                    <span className="font-semibold text-ink">{c.name}</span>
+                    <span className="block text-ink-soft">{c.description}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+        <Button type="submit" variant="outline" size="sm" className="mt-3">
+          Save channels
+        </Button>
+      </form>
+
+      <div>
+        <h3 className="font-semibold text-ink">Push notifications</h3>
+        {keys ? (
+          <PushToggle publicKey={keys.publicKey} channels={pushChannelsFor(user)} />
+        ) : (
+          <p className="mt-1 text-sm text-ink-soft" data-testid="push-disabled">
+            Push is switched off on this server (no VAPID keys configured). Your inbox still works;
+            see <code className="font-mono">.env.example</code> to turn it on.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}

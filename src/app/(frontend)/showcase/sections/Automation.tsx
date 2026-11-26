@@ -39,13 +39,14 @@ export const AutomationShowcase = async () => {
       id="automation"
       pkg="@xtr-dev/payload-automation"
       title="Workflows that run themselves"
-      intro="Studio routines as code-defined workflows: confirm a booking and the member gets an email and the studio log an entry, without a line of glue code in the booking flow."
+      intro="Studio routines as code-defined workflows that build on the other plugins: a confirmed booking gets a what-to-bring note in the member’s inbox and a studio log entry, and a hot kiln pages the technician and posts studio news."
       features={[
         'Collection-hook trigger with a JSONata condition: a booking moving to paid',
-        'Webhook trigger behind a hashed secret: kiln temperature alerts',
+        'Works with mailing and notifications: checks their confirmation email and inbox message, adds tips without duplicating either',
+        'Webhook trigger behind a hashed secret: kiln alerts that page the technician and broadcast studio news',
         'Global-hook trigger: opening hours changed in Site settings',
         'Manual run from server code, behind an admin-only button',
-        'Read, create, send-email and HTTP request steps, with dependencies and step outputs',
+        'Read, create, send-email and HTTP request steps, with dependencies, step conditions and step outputs',
         'Run history with every step’s result, here and in the admin panel',
       ]}
       usedOn={[

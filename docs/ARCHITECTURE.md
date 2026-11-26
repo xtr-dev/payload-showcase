@@ -50,7 +50,7 @@ file, keep it minimal and mention it in your PR.
 
 | Plugin        | Config                         | Seed                        | Tests                                                            | Showcase                                           | Site touchpoints (owned)                                                                                                 |
 | ------------- | ------------------------------ | --------------------------- | ---------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| billing       | `src/plugins/billing.ts`       | `src/seed/billing.ts`       | `tests/int/billing.int.spec.ts`, `tests/e2e/billing.e2e.spec.ts` | `src/app/(frontend)/showcase/sections/Billing.tsx` | `src/lib/checkout.ts`                                                                                                    |
+| billing       | `src/plugins/billing.ts`       | `src/seed/billing.ts`       | `tests/int/billing.int.spec.ts`, `tests/e2e/billing.e2e.spec.ts` | `src/app/(frontend)/showcase/sections/Billing.tsx` | `src/lib/checkout.ts`, `src/components/billing/*`, `checkout/return`, `account/invoices`, `account/sections/Billing.tsx` |
 | mailing       | `src/plugins/mailing.ts`       | `src/seed/mailing.ts`       | `tests/{int,e2e}/mailing.*`                                      | `…/sections/Mailing.tsx`                           | `src/app/(frontend)/account/sections/settings/Newsletter.tsx`                                                            |
 | notifications | `src/plugins/notifications.ts` | `src/seed/notifications.ts` | `tests/{int,e2e}/notifications.*`                                | `…/sections/Notifications.tsx`                     | `account/sections/Notifications.tsx`, `account/sections/settings/Push.tsx`, `src/components/layout/NotificationBell.tsx` |
 | feature-flags | `src/plugins/featureFlags.ts`  | `src/seed/featureFlags.ts`  | `tests/{int,e2e}/featureFlags.*`                                 | `…/sections/FeatureFlags.tsx`                      | `src/lib/flags.ts`, `src/components/booking/BookingFlowV2.tsx`                                                           |
@@ -91,8 +91,12 @@ file, keep it minimal and mention it in your PR.
 - `getCurrentUser()` / `requireUser(returnTo)` in `src/lib/auth.ts` read the `payload-token`
   cookie. Login, registration and logout use Payload's REST endpoints from client forms.
 - Booking: `/workshops/[slug]` → `/book/[sessionId]` → `reserveSeat` server action creates a
-  pending booking → `beginBookingCheckout()` → redirect (today `/account?booked=…`).
+  pending booking → `beginBookingCheckout()` → redirect to the payment page.
 - Membership: `/membership/join/[plan]` → `joinMembership` → `beginMembershipCheckout()`.
+- Checkout (billing): `beginBookingCheckout()` / `beginMembershipCheckout()` create an open
+  invoice and a payment, then redirect to the provider (the test provider by default). The
+  provider returns the visitor to `/checkout/return?t={returnToken}`; a payments `afterChange`
+  hook marks the booking paid (or activates the membership) and, on a full refund, refunded.
 - Every frontend route is dynamic (`force-dynamic` in the layout).
 
 ## Design system

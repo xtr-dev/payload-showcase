@@ -1,6 +1,8 @@
 import type { SeedWorkflow } from '@xtr-dev/payload-automation'
 import type { Payload } from 'payload'
 
+import { richText } from '@/lib/richtext'
+
 import type { SeedContext } from './types'
 
 /**
@@ -57,14 +59,16 @@ export const automationWorkflows = ({
     slug: WORKFLOW_SLUGS.bookingConfirmed,
     name: 'Booking confirmed',
     description:
-      'When a booking moves to "paid" (the studio\'s confirmed state), look up the session, ' +
-      'workshop and member, email the member a confirmation and write a studio log entry.',
+      'When a booking moves to "paid" (the studio\'s confirmed state), mailing has already ' +
+      'queued the confirmation email and notifications has posted the "Booking confirmed" ' +
+      'message. This workflow adds what neither does: it checks both went out, sends the member ' +
+      'a one-off "what to bring" note for their workshop, and records it all in the studio log.',
     triggers: [
       {
         type: 'collection-hook',
         parameters: { collectionSlug: 'bookings', hook: 'afterChange' },
         // Only the change into "paid" counts, so re-saving a paid booking (or seeding paid
-        // bookings) does not send a second confirmation.
+        // bookings) does not run the workflow again.
         condition:
           'trigger.operation = "update" and trigger.doc.status = "paid" and trigger.previousDoc.status != "paid"',
       },
@@ -81,16 +85,6 @@ export const automationWorkflows = ({
         },
       },
       {
-        name: 'Read member',
-        slug: 'read-member',
-        type: 'read-document',
-        input: {
-          collectionSlug: 'users',
-          id: `{{${relIdExpr('trigger.doc.member')}}}`,
-          depth: 0,
-        },
-      },
-      {
         name: 'Read workshop',
         slug: 'read-workshop',
         type: 'read-document',
@@ -102,25 +96,79 @@ export const automationWorkflows = ({
         },
       },
       {
-        name: 'Email confirmation',
-        slug: 'email-confirmation',
-        type: 'send-email',
-        dependencies: ['read-member', 'read-workshop'],
+        // Written by mailing's bookings hook, which runs before automation's in the same save.
+        name: 'Find confirmation email',
+        slug: 'find-confirmation-email',
+        type: 'read-document',
         input: {
-          to: '{{steps.`Read member`.output.doc.email}}',
-          subject: '{{"Your seat in " & steps.`Read workshop`.output.doc.title & " is confirmed"}}',
-          text:
-            '{{"Hi " & steps.`Read member`.output.doc.name & ",\\n\\nYour seat in " & ' +
-            'steps.`Read workshop`.output.doc.title & " on " & ' +
-            studioDateExpr('steps.`Read session`.output.doc.startsAt') +
-            ' & " is confirmed (booking " & trigger.doc.reference & ").\\n\\nAprons are on us. See you at the wheel!\\n\\nKiln & Co."}}',
+          collectionSlug: 'emails',
+          where: {
+            booking: { equals: '{{trigger.doc.id}}' },
+            templateSlug: { equals: 'booking-confirmation' },
+          },
+          limit: 1,
+          depth: 0,
+        },
+      },
+      {
+        // Written by notifyBookingStatus (src/lib/notifications.ts) in the same save.
+        name: 'Find confirmation notification',
+        slug: 'find-confirmation-notification',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'notifications',
+          where: {
+            booking: { equals: '{{trigger.doc.id}}' },
+            event: { equals: 'booking-confirmed' },
+          },
+          limit: 1,
+          depth: 0,
+        },
+      },
+      {
+        name: 'Find earlier tips',
+        slug: 'find-earlier-tips',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'notifications',
+          where: {
+            booking: { equals: '{{trigger.doc.id}}' },
+            channel: { equals: 'class-reminders' },
+          },
+          limit: 1,
+          depth: 0,
+        },
+      },
+      {
+        // A step condition: a booking that is paid again later (after a cancellation) doesn't
+        // get the tips twice.
+        name: 'Send what-to-bring tips',
+        slug: 'send-tips',
+        type: 'create-document',
+        dependencies: ['read-workshop', 'find-earlier-tips'],
+        condition: 'steps.`Find earlier tips`.output.totalDocs = 0',
+        input: {
+          collectionSlug: 'notifications',
+          data: {
+            title: '{{"Getting ready for " & steps.`Read workshop`.output.doc.title}}',
+            message: richText(
+              '{{"Your class starts " & ' +
+                studioDateExpr('steps.`Read session`.output.doc.startsAt') +
+                ' & ". Wear clothes that can take a splash of slip, keep your nails short and ' +
+                'tie back long hair. Aprons, tools and clay are on us."}}',
+              'Arrive ten minutes early for tea and a spot at the wheel.',
+            ),
+            channel: 'class-reminders',
+            recipient: `{{${relIdExpr('trigger.doc.member')}}}`,
+            booking: '{{trigger.doc.id}}',
+          },
         },
       },
       {
         name: 'Write studio log',
         slug: 'write-studio-log',
         type: 'create-document',
-        dependencies: ['email-confirmation'],
+        dependencies: ['find-confirmation-email', 'find-confirmation-notification', 'send-tips'],
         input: {
           collectionSlug: 'studio-log',
           data: {
@@ -129,7 +177,12 @@ export const automationWorkflows = ({
             message:
               '{{"A seat for " & ' +
               studioDateExpr('steps.`Read session`.output.doc.startsAt') +
-              ' & " was confirmed and the confirmation email went out."}}',
+              ' & " was confirmed. Confirmation email: " & ' +
+              '(steps.`Find confirmation email`.output.totalDocs > 0 ? "queued by mailing" : "not found") & ' +
+              '". Inbox message: " & ' +
+              '(steps.`Find confirmation notification`.output.totalDocs > 0 ? "sent by notifications" : "not found") & ' +
+              '". What-to-bring tips: " & ' +
+              '(steps.`Send what-to-bring tips`.state = "succeeded" ? "sent" : "already sent earlier") & "."}}',
             source: 'booking',
             severity: 'info',
             booking: '{{trigger.doc.id}}',
@@ -144,7 +197,8 @@ export const automationWorkflows = ({
     description:
       'The kiln controller posts its readings to a webhook. Readings at or above ' +
       `${KILN_ALERT_THRESHOLD_C} °C page the kiln technician (an HTTP request to the site's mock ` +
-      'pager) and write a warning to the studio log with the pager ticket.',
+      'pager), post a "Studio news" notification to members and write a warning to the studio log ' +
+      'with the pager ticket.',
     triggers: [
       {
         type: 'webhook',
@@ -183,6 +237,24 @@ export const automationWorkflows = ({
               '{{"Paged " & steps.`Page kiln technician`.output.data.onCall & " (ticket " & steps.`Page kiln technician`.output.data.ticket & ")."}}',
             source: 'webhook',
             severity: 'warning',
+          },
+        },
+      },
+      {
+        // A broadcast (no recipient) on the notifications plugin's "Studio news" channel, shown in
+        // the inbox of every member who follows it.
+        name: 'Post studio news',
+        slug: 'post-studio-news',
+        type: 'create-document',
+        dependencies: ['page-technician'],
+        input: {
+          collectionSlug: 'notifications',
+          data: {
+            title: '{{"Kiln update: " & $string(trigger.doc.kiln) & " is running hot"}}',
+            message: richText(
+              'Our kiln technician is checking it now. Pieces in this firing may be ready a day later than planned; we will let you know when they are out.',
+            ),
+            channel: 'studio-news',
           },
         },
       },
