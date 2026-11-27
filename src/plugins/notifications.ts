@@ -1,23 +1,17 @@
 import { notificationsPlugin, type WebPushConfig } from '@xtr-dev/payload-notifications'
 import type { CollectionAfterChangeHook, CollectionConfig, Payload, Plugin } from 'payload'
 
-import { isAdminField } from '@/access'
-import {
-  CHANNELS,
-  OPTIONAL_CHANNEL_IDS,
-  notifyBookingStatus,
-  pushChannelsFor,
-  vapidKeys,
-} from '@/lib/notifications'
-import type { Booking, User } from '@/payload-types'
+import { CHANNELS, notifyBookingStatus, vapidKeys } from '@/lib/notifications'
+import type { Booking, ChannelSubscription } from '@/payload-types'
 
 import { extendCollection } from './utils'
 
 /**
  * @xtr-dev/payload-notifications
  *
- * In-app inbox for members (booking confirmations, class reminders, studio news channels) and
- * optional web push. See src/lib/notifications.ts for the helpers the site and other plugins use.
+ * In-app inbox for members (booking confirmations, class reminders, studio news channels),
+ * per-member channel opt-outs (the plugin's `channel-subscriptions` collection) and optional web
+ * push. See src/lib/notifications.ts for the helpers the site and other plugins use.
  *
  * Env: NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (+ VAPID_SUBJECT) turn on web push. Without
  * them the inbox works as usual and the plugin registers no push endpoints.
@@ -31,14 +25,17 @@ const relId = (value: unknown): number | null => {
 
 /**
  * Picks the devices a notification is pushed to. Personal notifications go to all of the
- * recipient's devices; broadcasts go to devices whose channels include the notification's channel.
- * A personal notification whose recipient was deleted goes nowhere. Subscription channels are kept
- * in sync with the member's preferences by the users hook below.
+ * recipient's devices, whatever the channel, like the inbox. Broadcasts go to devices subscribed
+ * to the notification's channel, except those of members who opted out of that channel: a custom
+ * `findSubscriptions` replaces the plugin's own targeting, so it has to apply the members'
+ * channel subscriptions itself. A personal notification whose recipient was deleted goes nowhere.
  */
 const findSubscriptions = async (notification: Record<string, unknown>, payload: Payload) => {
   const recipient = relId(notification.recipient)
   const channel = typeof notification.channel === 'string' ? notification.channel : null
   if (notification.audience !== 'broadcast' && recipient === null) return []
+  const optedOut =
+    notification.audience === 'broadcast' && channel ? await optedOutOf(payload, channel) : []
   const { docs } = await payload.find({
     collection: 'push-subscriptions',
     where: {
@@ -49,12 +46,29 @@ const findSubscriptions = async (notification: Record<string, unknown>, payload:
           : channel
             ? { channels: { in: [channel] } }
             : { id: { exists: true } },
+        ...(optedOut.length ? [{ user: { not_in: optedOut } }] : []),
       ],
     },
     depth: 0,
     pagination: false,
   })
   return docs
+}
+
+/** Ids of the members who opted out of `channel` (a `subscribed: false` channel subscription). */
+const optedOutOf = async (payload: Payload, channel: string): Promise<number[]> => {
+  const { docs } = await payload.find({
+    collection: 'channel-subscriptions',
+    where: {
+      and: [
+        { channel: { equals: channel as ChannelSubscription['channel'] } },
+        { subscribed: { equals: false } },
+      ],
+    },
+    depth: 0,
+    pagination: false,
+  })
+  return docs.map((doc) => relId(doc.user)).filter((id): id is number => id !== null)
 }
 
 const webPush = (): WebPushConfig | undefined => {
@@ -77,6 +91,9 @@ const webPush = (): WebPushConfig | undefined => {
  * Adds the booking link and event to notifications and groups the plugin's collections in the
  * admin. Access stays the plugin's default: members read their own notifications and broadcasts,
  * only admins write content, and broadcast read state is kept per member in `notification-reads`.
+ * The two added fields need no update rule of their own: the plugin lets a recipient change
+ * nothing but the read state of their notification unless a field is listed in its
+ * `recipientEditableFields` option, which the site leaves empty.
  */
 const notificationsCollection = (config: CollectionConfig): CollectionConfig => ({
   ...config,
@@ -87,7 +104,6 @@ const notificationsCollection = (config: CollectionConfig): CollectionConfig => 
       type: 'relationship',
       relationTo: 'bookings',
       index: true,
-      access: { update: isAdminField },
       admin: { position: 'sidebar', description: 'The booking this notification is about.' },
     },
     {
@@ -98,7 +114,6 @@ const notificationsCollection = (config: CollectionConfig): CollectionConfig => 
         { label: 'Booking confirmed', value: 'booking-confirmed' },
         { label: 'Booking refunded', value: 'booking-refunded' },
       ],
-      access: { update: isAdminField },
       admin: { position: 'sidebar', readOnly: true },
     },
   ],
@@ -147,46 +162,6 @@ const extendBookings = extendCollection('bookings', (bookings) => ({
   },
 }))
 
-/**
- * Users get a `notificationChannels` preference, and their push subscriptions follow it. (The
- * plugin itself removes a deleted member's notifications, read receipts and devices.)
- */
-const extendUsers = extendCollection('users', (users) => ({
-  ...users,
-  fields: [
-    ...users.fields,
-    {
-      name: 'notificationChannels',
-      type: 'select',
-      hasMany: true,
-      label: 'Notification channels',
-      options: CHANNELS.filter((c) => c.optional).map((c) => ({ label: c.name, value: c.id })),
-      defaultValue: OPTIONAL_CHANNEL_IDS,
-      admin: {
-        description: 'Broadcast channels this member follows. Bookings are always delivered.',
-      },
-    },
-  ],
-  hooks: {
-    ...users.hooks,
-    afterChange: [
-      ...(users.hooks?.afterChange ?? []),
-      async ({ doc, previousDoc, operation, req }) => {
-        if (operation !== 'update') return doc
-        const before = JSON.stringify(previousDoc?.notificationChannels ?? null)
-        if (before === JSON.stringify(doc.notificationChannels ?? null)) return doc
-        await req.payload.update({
-          collection: 'push-subscriptions',
-          where: { user: { equals: doc.id } },
-          data: { channels: pushChannelsFor(doc as User) as never },
-          req,
-        })
-        return doc
-      },
-    ],
-  },
-}))
-
 const inGroup = (config: CollectionConfig): CollectionConfig => ({
   ...config,
   admin: { ...config.admin, group: 'Notifications' },
@@ -200,8 +175,8 @@ export const notifications: Plugin[] = [
       notifications: notificationsCollection,
       pushSubscriptions: inGroup,
       notificationReads: inGroup,
+      channelSubscriptions: inGroup,
     },
   }),
-  extendUsers,
   extendBookings,
 ]

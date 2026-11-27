@@ -50,6 +50,7 @@ export const AutomationShowcase = async () => {
         'Scheduled (cron) trigger in the studio’s timezone: a morning report at 07:00, fired by Payload’s job scheduler',
         'Manual run from server code, behind an admin-only button',
         'Read, create, send-email and HTTP request steps, with dependencies, step conditions and step outputs',
+        'Step retries: the pager call is tried up to three times before the alert run fails',
         'Run history with every step’s result, here and in the admin panel',
       ]}
       usedOn={[

@@ -1,15 +1,17 @@
 import { PushToggle } from '@/components/notifications/PushToggle'
 import { saveNotificationChannels } from '@/components/notifications/actions'
 import { Button } from '@/components/ui'
-import { CHANNELS, followedChannels, pushChannelsFor, vapidKeys } from '@/lib/notifications'
+import { ALL_CHANNEL_IDS, CHANNELS, getFollowedChannels, vapidKeys } from '@/lib/notifications'
+import { getPayloadClient } from '@/lib/payload'
 import type { User } from '@/payload-types'
 
 /**
- * Notification channel preferences and the web push opt-in for this device. Push only appears
+ * Notification channel preferences (the plugin's per-member channel subscriptions: unticking a
+ * channel opts the member out of it) and the web push opt-in for this device. Push only appears
  * when the server has VAPID keys; without them the inbox works and this explains why push is off.
  */
 export const PushSetting = async ({ user }: { user: User }) => {
-  const followed = followedChannels(user)
+  const followed = await getFollowedChannels(await getPayloadClient(), user)
   const keys = vapidKeys()
 
   return (
@@ -46,7 +48,7 @@ export const PushSetting = async ({ user }: { user: User }) => {
       <div>
         <h3 className="font-semibold text-ink">Push notifications</h3>
         {keys ? (
-          <PushToggle publicKey={keys.publicKey} channels={pushChannelsFor(user)} />
+          <PushToggle publicKey={keys.publicKey} channels={ALL_CHANNEL_IDS} />
         ) : (
           <p className="mt-1 text-sm text-ink-soft" data-testid="push-disabled">
             Push is switched off on this server (no VAPID keys configured). Your inbox still works;

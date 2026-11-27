@@ -11,13 +11,15 @@ import {
 import { findStepResult } from '@xtr-dev/payload-automation/server'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRecentRuns, runStudioDigest } from '@/lib/automation'
+import { getRecentRuns, getRunSummary, runStudioDigest } from '@/lib/automation'
 import type { Booking, User, WorkflowRun } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
 import {
   DEV_WEBHOOK_SECRET,
   KILN_ALERT_THRESHOLD_C,
   KILN_ALERT_WEBHOOK_PATH,
+  KILN_PAGER_STEP,
+  STEP_RETRIES,
   WORKFLOW_SLUGS,
 } from '@/seed/automation'
 
@@ -37,6 +39,8 @@ let mara: User
 /** Stands in for the site's mock pager, which needs a running HTTP server. */
 let pager: http.Server
 const pagerCalls: unknown[] = []
+/** How many of the next pager calls drop the connection, which fails the HTTP step's attempt. */
+let pagerOutages = 0
 
 const relId = (v: unknown) => (v && typeof v === 'object' ? (v as { id: number }).id : v)
 
@@ -90,6 +94,11 @@ const postWebhook = async (body: unknown, headers: Record<string, string> = {}) 
 
 beforeAll(async () => {
   pager = http.createServer((req, res) => {
+    if (pagerOutages > 0) {
+      pagerOutages -= 1
+      req.socket.destroy()
+      return
+    }
     let raw = ''
     req.on('data', (chunk) => (raw += chunk))
     req.on('end', () => {
@@ -322,6 +331,58 @@ describe('Kiln temperature alert (webhook)', () => {
     expect(JSON.stringify(run)).not.toContain('webhookSecretHash')
   })
 
+  it('retries the pager call when the pager is down for a moment', async () => {
+    // Seeded steps get their retry settings from stepRetryPlugin (src/plugins/automation.ts).
+    const { docs } = await payload.find({
+      collection: 'automation-steps',
+      where: { retryOnFailure: { equals: true } },
+      depth: 0,
+    })
+    expect(docs.map((s) => [s.name, s.maxRetries, s.retryDelay])).toEqual(
+      STEP_RETRIES.map((r) => [
+        'Kiln temperature alert - Page kiln technician',
+        r.maxRetries,
+        r.retryDelay,
+      ]),
+    )
+
+    const before = pagerCalls.length
+    pagerOutages = 1
+    const res = await postWebhook(alert, { authorization: `Bearer ${DEV_WEBHOOK_SECRET}` })
+    expect(res.status).toBe(200)
+
+    // The first attempt hit the outage; the second one reached the pager.
+    expect(pagerOutages).toBe(0)
+    expect(pagerCalls.length).toBe(before + 1)
+    const [run] = await runsOf(WORKFLOW_SLUGS.kilnAlert)
+    expect(run.status).toBe('completed')
+    const page = run.stepResults?.find((s) => s.slug === KILN_PAGER_STEP)
+    expect(page).toMatchObject({ status: 'succeeded', attempts: 2, retryCount: 1 })
+    expect(page?.lastError).toBeTruthy()
+    expect(
+      run.stepResults?.filter((s) => s.slug !== KILN_PAGER_STEP).map((s) => s.attempts),
+    ).toEqual([1, 1])
+
+    const summary = await getRunSummary(payload, run.id)
+    expect(summary?.steps.map((s) => s.attempts)).toEqual([2, 1, 1])
+  })
+
+  it('fails the run when the pager stays down for every attempt', async () => {
+    const before = pagerCalls.length
+    const attempts = STEP_RETRIES[0].maxRetries + 1
+    pagerOutages = attempts
+    await postWebhook(alert, { authorization: `Bearer ${DEV_WEBHOOK_SECRET}` })
+
+    expect(pagerOutages).toBe(0)
+    expect(pagerCalls.length).toBe(before)
+    const [run] = await runsOf(WORKFLOW_SLUGS.kilnAlert)
+    expect(run.status).toBe('failed')
+    expect(run.stepResults?.find((s) => s.slug === KILN_PAGER_STEP)).toMatchObject({
+      status: 'failed',
+      attempts,
+    })
+  })
+
   it('serves a mock pager that answers like a paging API', async () => {
     const endpoint = findEndpoint('/studio/kiln-pager')
     const req = (await createLocalReq(
@@ -413,7 +474,7 @@ describe('run history', () => {
       user: ctx.admin,
       overrideAccess: false,
     })
-    expect(asAdmin.totalDocs).toBe(5)
+    expect(asAdmin.totalDocs).toBe(7)
   })
 
   it('summarises runs for the public without trigger data, step data or errors', async () => {
@@ -421,6 +482,9 @@ describe('run history', () => {
     expect(runs.map((r) => r.workflowSlug)).toEqual([
       WORKFLOW_SLUGS.studioDigest,
       WORKFLOW_SLUGS.openingHours,
+      // The alert that failed on every attempt, the retried one and the first one.
+      WORKFLOW_SLUGS.kilnAlert,
+      WORKFLOW_SLUGS.kilnAlert,
       WORKFLOW_SLUGS.kilnAlert,
       WORKFLOW_SLUGS.bookingConfirmed,
       WORKFLOW_SLUGS.bookingConfirmed,
@@ -433,7 +497,7 @@ describe('run history', () => {
 
   it('lets the public read the studio log but not which booking an entry is about', async () => {
     const { docs } = await payload.find({ collection: 'studio-log', overrideAccess: false })
-    expect(docs.length).toBe(5)
+    expect(docs.length).toBe(6)
     expect(docs.every((d) => d.booking === undefined)).toBe(true)
     await expect(
       payload.create({

@@ -28,6 +28,8 @@ export interface RunSummary {
     name: string
     status: StepStatus
     durationMs: number | null
+    /** How often the step ran: 1, or more when a failed attempt was retried. */
+    attempts: number
     error?: string
   }>
   /** Only filled in for admins: error messages can quote data from the run. */
@@ -48,6 +50,8 @@ const toSummary = (run: WorkflowRun, { includeErrors }: { includeErrors: boolean
       name: step.stepName ?? 'Step',
       status: step.status ?? 'pending',
       durationMs: step.duration ?? null,
+      // Skipped and pending steps have no attempts; runs stored before 0.5.0 have no count.
+      attempts: step.attempts ?? 1,
       ...(includeErrors && step.error ? { error: step.error } : {}),
     })),
     ...(includeErrors && run.error ? { error: run.error } : {}),
@@ -75,7 +79,14 @@ export const getRecentRuns = async (
       startedAt: true,
       duration: true,
       error: true,
-      stepResults: { slug: true, stepName: true, status: true, duration: true, error: true },
+      stepResults: {
+        slug: true,
+        stepName: true,
+        status: true,
+        duration: true,
+        attempts: true,
+        error: true,
+      },
     },
     populate: { workflows: { name: true, slug: true } },
   })

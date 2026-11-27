@@ -13,6 +13,10 @@ export DATABASE_URL="file:./.e2e/kiln-e2e.db"
 export MEDIA_DIR="./.e2e/media"
 export PAYLOAD_SECRET="${PAYLOAD_SECRET:-e2e-secret-not-for-production}"
 export SEED_ON_INIT=false
+# `next start` runs in production mode, where the site makes up a random kiln alert webhook
+# secret on every start unless one is set, and the automation plugin stores the hash of whatever
+# secret the server starts with. The e2e suite calls the webhook with this same default.
+export AUTOMATION_WEBHOOK_SECRET="${AUTOMATION_WEBHOOK_SECRET:-kiln-dev-webhook-secret-change-me}"
 
 rm -rf .e2e
 mkdir -p .e2e

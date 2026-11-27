@@ -27,20 +27,20 @@ importers:
         specifier: 3.94.2
         version: 3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)
       '@xtr-dev/payload-automation':
-        specifier: ^0.4.0
-        version: 0.4.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
+        specifier: ^0.5.0
+        version: 0.5.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
       '@xtr-dev/payload-billing':
-        specifier: ^0.5.1
-        version: 0.5.1(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)(stripe@22.6.2(@types/node@22.19.9))
+        specifier: ^0.6.0
+        version: 0.6.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(stripe@22.6.2(@types/node@22.19.9))
       '@xtr-dev/payload-feature-flags':
-        specifier: ^0.2.1
-        version: 0.2.1(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
+        specifier: ^0.3.0
+        version: 0.3.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
       '@xtr-dev/payload-mailing':
-        specifier: ^0.8.0
-        version: 0.8.0(aa0934693d6a4d311916609b0672c373)
+        specifier: ^0.9.0
+        version: 0.9.0(aa0934693d6a4d311916609b0672c373)
       '@xtr-dev/payload-notifications':
-        specifier: ^0.2.1
-        version: 0.2.1(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
+        specifier: ^0.3.0
+        version: 0.3.0(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
       croner:
         specifier: ^9.1.0
         version: 9.1.0
@@ -1488,6 +1488,7 @@ packages:
   '@mollie/api-client@4.6.0':
     resolution: {integrity: sha512-7G3Ya3Yf+Z3q7aNhtlStxWp4p7FEgmWPyoq23crTcjmrYmos6hMjCweMKCPRj/aW7Z3UX7yark/lTgZRQvF4Cw==}
     engines: {node: '>=8'}
+    deprecated: 'This SDK is in maintenance mode. Migrate to mollie-api-typescript: https://github.com/mollie/mollie-api-typescript/blob/main/MIGRATION.md'
 
   '@monaco-editor/loader@1.7.0':
     resolution: {integrity: sha512-gIwR1HrJrrx+vfyOhYmCZ0/JcWqG5kbfG7+d3f/C1LXk2EvzAbHSg3MQ5lO2sMlo9izoAZ04shohfKLVT6crVA==}
@@ -2186,8 +2187,8 @@ packages:
   '@vscode/diff@0.0.2-145':
     resolution: {integrity: sha512-atPcmNrAU4B8OsbrmqYlHbZREt//m8z52o400YA8uuvq3Be5wnmIhLoLqhMum7Jv7kRC0FE+m3WAUbaZF681wg==}
 
-  '@xtr-dev/payload-automation@0.4.0':
-    resolution: {integrity: sha512-ygFLc077uKZ/DaOMhbqE3M2W9nN5BVSrQsOdkXmg/LqDqrOV849mWhhstauC6mqe7eZhPMHw9tangycXleYvVA==}
+  '@xtr-dev/payload-automation@0.5.0':
+    resolution: {integrity: sha512-i6JmPQYsT48LDGAkGQ3bq36SzoIKqhbO6z6IlmcA9objdbtfj8WBB5qcmE2ExRyzW2FSs4Ht4DYVDLqpZ/etzg==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       '@payloadcms/ui': ^3.79.1
@@ -2197,25 +2198,24 @@ packages:
       '@payloadcms/ui':
         optional: true
 
-  '@xtr-dev/payload-billing@0.5.1':
-    resolution: {integrity: sha512-gLfbpmNvsE85+MLMc7Vk6nRWRw98rOwoSb428FafaPOyO9nz/yruHNmAmM2cHqsu6d1AZ3Ekm/khhktPZ7QV5g==}
+  '@xtr-dev/payload-billing@0.6.0':
+    resolution: {integrity: sha512-7n9e5hh7yvgKAe3S/VbJGzX0hrmorD5k/mZ1A5qdgYZQBKk7q2GdtaGY8KhdVf0wcAWZvGjrFEh+3cHpj+ooxA==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       '@mollie/api-client': ^3.7.0 || ^4.0.0
       payload: ^3.37.0
-      react: ^19.0.0
       stripe: ^18.5.0 || ^19.0.0 || ^20.0.0 || ^21.0.0 || ^22.0.0
 
-  '@xtr-dev/payload-feature-flags@0.2.1':
-    resolution: {integrity: sha512-WNJONzZ1wjjLJXvTQUbVbg9dXQ7ffdUW9aIlJlqUr8SREka28PCBlZkSqhvvICozBy/Jubpjrz9Ql9DyhOsNgw==}
+  '@xtr-dev/payload-feature-flags@0.3.0':
+    resolution: {integrity: sha512-iC0Qhf7EfXsvsBm2udPxOY5Z2VxjCnRRPL5B0B7MTl0xHlsdMoMRER06GYa2kqLNefsZgxBXWtK5UgNKCnT7tw==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       '@payloadcms/ui': ^3.56.0
       payload: ^3.56.0
       react: ^19.1.0
 
-  '@xtr-dev/payload-mailing@0.8.0':
-    resolution: {integrity: sha512-XiqfPgIZXv8ItPVZUaq8eCvqA7tP1o3KUD142JPXA9Lja6/FJEBeDd3wS7oihBfTstNifA7o9+IXpVJsPkxpRg==}
+  '@xtr-dev/payload-mailing@0.9.0':
+    resolution: {integrity: sha512-rQV3Nr4pC3++FcGOOiMCWMx4/vGoqXEsTcHLqpPTVUJiRNOWEao6p9qM4aZJy6HJhjHeibIxVQePVL49TU8VAQ==}
     engines: {node: ^18.20.2 || >=20.9.0, npm: '>=8.0.0'}
     peerDependencies:
       '@payloadcms/richtext-lexical': ^3.37.0
@@ -2228,8 +2228,8 @@ packages:
       react:
         optional: true
 
-  '@xtr-dev/payload-notifications@0.2.1':
-    resolution: {integrity: sha512-bnzYcCpmoZxm4H8/V/0oTe9T2J3QiU71yId1Bu8U1xALQ/nk3skyj2nsWUpq0pyY/AO6S8QNq4UKPxn/i2MB1g==}
+  '@xtr-dev/payload-notifications@0.3.0':
+    resolution: {integrity: sha512-u65Z87GY0MMRPcUrim+PQkTdkD9uoQo/z0eMopnZDHd1S1TtMCHbRByaZA5j/ZQoJs0UPuaOLWoY257To+Tb2A==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       payload: ^3.37.0
@@ -6658,7 +6658,7 @@ snapshots:
 
   '@vscode/diff@0.0.2-145': {}
 
-  '@xtr-dev/payload-automation@0.4.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
+  '@xtr-dev/payload-automation@0.5.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
     dependencies:
       croner: 9.1.0
       jsonata: 2.2.2
@@ -6667,20 +6667,19 @@ snapshots:
     optionalDependencies:
       '@payloadcms/ui': 3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)
 
-  '@xtr-dev/payload-billing@0.5.1(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)(stripe@22.6.2(@types/node@22.19.9))':
+  '@xtr-dev/payload-billing@0.6.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(stripe@22.6.2(@types/node@22.19.9))':
     dependencies:
       '@mollie/api-client': 4.6.0
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
-      react: 19.2.9
       stripe: 22.6.2(@types/node@22.19.9)
 
-  '@xtr-dev/payload-feature-flags@0.2.1(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
+  '@xtr-dev/payload-feature-flags@0.3.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
     dependencies:
       '@payloadcms/ui': 3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
       react: 19.2.9
 
-  '@xtr-dev/payload-mailing@0.8.0(aa0934693d6a4d311916609b0672c373)':
+  '@xtr-dev/payload-mailing@0.9.0(aa0934693d6a4d311916609b0672c373)':
     dependencies:
       '@payloadcms/richtext-lexical': 3.94.2(@faceless-ui/modal@3.0.0(react-dom@19.2.9(react@19.2.9))(react@19.2.9))(@faceless-ui/scroll-info@2.0.0(react-dom@19.2.9(react@19.2.9))(react@19.2.9))(@payloadcms/next@3.94.2(@types/react@19.2.14)(graphql@16.15.0)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)(yjs@13.6.33)
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
@@ -6690,7 +6689,7 @@ snapshots:
       mustache: 4.2.0
       react: 19.2.9
 
-  '@xtr-dev/payload-notifications@0.2.1(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
+  '@xtr-dev/payload-notifications@0.3.0(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
     dependencies:
       '@types/web-push': 3.6.4
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)

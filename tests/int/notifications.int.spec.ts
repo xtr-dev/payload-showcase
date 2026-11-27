@@ -1,7 +1,14 @@
 import { createLocalReq, type Payload } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { broadcast, countUnread, getInbox, notifyMember } from '@/lib/notifications'
+import {
+  broadcast,
+  countUnread,
+  getFollowedChannels,
+  getInbox,
+  notifyMember,
+  setFollowedChannels,
+} from '@/lib/notifications'
 import { richText } from '@/lib/richtext'
 import type { User } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
@@ -34,6 +41,25 @@ const setRead = async (user: User, id: number, read: boolean): Promise<number> =
   return res.status
 }
 
+/**
+ * Calls the plugin's `/api/channel-subscriptions/me` endpoints as `user`: `GET /me` lists the
+ * channels with the user's state, `POST`/`DELETE /me/:channel` subscribes or opts out.
+ */
+const channelEndpoint = async (
+  user: User,
+  method: 'get' | 'post' | 'delete',
+  channel?: string,
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  const endpoint = (payload.collections['channel-subscriptions'].config.endpoints || []).find(
+    (e) => e.path === (channel ? '/me/:channel' : '/me') && e.method === method,
+  )
+  if (!endpoint) throw new Error('The channel subscription endpoint is not registered')
+  const req = await createLocalReq({ user: { ...user, collection: 'users' } }, payload)
+  req.routeParams = channel ? { channel } : {}
+  const res = await endpoint.handler(req)
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+}
+
 /** Re-reads a user, so preference changes made during a test are picked up. */
 const fresh = (user: User) => payload.findByID({ collection: 'users', id: user.id })
 
@@ -52,7 +78,12 @@ describe('Notifications (payload-notifications)', () => {
   it('is wired into the Payload config with the studio channels and web push off', () => {
     const slugs = payload.config.collections.map((c) => c.slug)
     expect(slugs).toEqual(
-      expect.arrayContaining(['notifications', 'push-subscriptions', 'notification-reads']),
+      expect.arrayContaining([
+        'notifications',
+        'push-subscriptions',
+        'notification-reads',
+        'channel-subscriptions',
+      ]),
     )
     const channel = payload.collections.notifications.config.fields.find(
       (f) => 'name' in f && f.name === 'channel',
@@ -183,14 +214,13 @@ describe('Notifications (payload-notifications)', () => {
       message: 'Open until 21:00 in July.',
     })
 
-    // Mara follows class reminders only.
-    await payload.update({
-      collection: 'users',
-      id: mara.id,
-      data: { notificationChannels: ['class-reminders'] },
-      user: mara,
-      overrideAccess: false,
-    })
+    // Nobody chose yet, so everyone follows every channel and no row is stored.
+    expect(await getFollowedChannels(payload, mara)).toEqual(['class-reminders', 'studio-news'])
+    expect((await payload.count({ collection: 'channel-subscriptions' })).totalDocs).toBe(0)
+
+    // Mara follows class reminders only (what "Save channels" in the account settings stores).
+    await setFollowedChannels(payload, mara, ['class-reminders'])
+    expect(await getFollowedChannels(payload, mara)).toEqual(['class-reminders'])
     const maraInbox = (await getInbox(payload, await fresh(mara))).map((i) => i.notification)
     expect(maraInbox.map((n) => n.id)).toContain(reminder.id)
     expect(maraInbox.map((n) => n.id)).not.toContain(news.id)
@@ -205,6 +235,42 @@ describe('Notifications (payload-notifications)', () => {
     expect(jonasInbox).toEqual(expect.arrayContaining([reminder.id, news.id]))
 
     expect(news.audience).toBe('broadcast')
+
+    // The plugin's REST endpoints show the same choice, and only ever act on the caller.
+    const listed = await channelEndpoint(mara, 'get')
+    expect(listed.status).toBe(200)
+    expect(listed.body.channels).toEqual([
+      expect.objectContaining({ id: 'bookings', subscribed: true }),
+      expect.objectContaining({ id: 'class-reminders', subscribed: true }),
+      expect.objectContaining({ id: 'studio-news', subscribed: false }),
+    ])
+    expect((await channelEndpoint(mara, 'post', 'kiln-gossip')).status).toBe(404)
+
+    // Opting back in through the endpoint brings the broadcast back into the inbox.
+    expect(await channelEndpoint(mara, 'post', 'studio-news')).toEqual({
+      status: 200,
+      body: { channel: 'studio-news', subscribed: true },
+    })
+    expect((await getInbox(payload, mara)).map((i) => i.notification.id)).toContain(news.id)
+    expect(await getFollowedChannels(payload, jonas)).toEqual(['class-reminders', 'studio-news'])
+
+    // One row per member and channel, and a member reads only their own rows.
+    const maraRows = await payload.find({
+      collection: 'channel-subscriptions',
+      user: mara,
+      overrideAccess: false,
+      depth: 0,
+    })
+    expect(maraRows.docs.map((d) => [relId(d.user), d.channel, d.subscribed]).sort()).toEqual([
+      [mara.id, 'class-reminders', true],
+      [mara.id, 'studio-news', true],
+    ])
+    const jonasRows = await payload.find({
+      collection: 'channel-subscriptions',
+      user: jonas,
+      overrideAccess: false,
+    })
+    expect(jonasRows.totalDocs).toBe(0)
   })
 
   it('notifies the member once when a booking is paid, and when it is refunded', async () => {
@@ -308,6 +374,23 @@ describe('Notifications (payload-notifications)', () => {
     expect(updated.title).toBe(own.title)
     expect(relId(updated.recipient)).toBe(mara.id)
     expect(updated.isRead).toBe(false)
+
+    // The same goes for the fields the site adds (`booking`, `event`): they are not listed in
+    // the plugin's `recipientEditableFields`, so a recipient's change to them is dropped.
+    const confirmed = (await getInbox(payload, mara)).find(
+      (i) => i.notification.event === 'booking-confirmed',
+    )!.notification
+    const tampered = await payload.update({
+      collection: 'notifications',
+      id: confirmed.id,
+      data: { event: 'booking-refunded', booking: null, isRead: true },
+      user: mara,
+      overrideAccess: false,
+      depth: 0,
+    })
+    expect(tampered.event).toBe('booking-confirmed')
+    expect(relId(tampered.booking)).toBe(relId(confirmed.booking))
+    expect(tampered.isRead).toBe(true)
 
     const jonasOwn = (await getInbox(payload, jonas)).find((i) => i.personal)!.notification
     await expect(
