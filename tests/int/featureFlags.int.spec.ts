@@ -49,7 +49,7 @@ const ids = (n: number) => Array.from({ length: n }, () => randomUUID())
 describe('FeatureFlags (payload-feature-flags)', () => {
   it('is wired into the Payload config with the seeded flags', async () => {
     const { docs } = await payload.find({ collection: FLAGS_SLUG, sort: 'name' })
-    expect(docs.map((d) => d.name)).toEqual(['gift-cards', 'home-hero', 'new-booking-flow'])
+    expect(docs.map((d) => d.name)).toEqual(['gift-cards', 'home-hero', 'new-booking-flow', 'shop'])
     expect(payload.config.collections.some((c) => c.slug === EVENTS_SLUG)).toBe(true)
     expect(payload.config.admin.components.views?.['feature-flags-overview']).toBeDefined()
   })

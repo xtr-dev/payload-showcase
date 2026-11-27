@@ -37,6 +37,14 @@ export const FLAG_SEEDS: FlagSeed[] = [
     rolloutPercentage: 50,
     tags: [{ tag: 'rollout' }, { tag: 'booking' }],
   },
+  {
+    name: 'shop',
+    description:
+      'Shows the studio shop and its navigation link. Off means /shop and every page under it is a 404.',
+    enabled: true,
+    rolloutPercentage: 100,
+    tags: [{ tag: 'release' }, { tag: 'shop' }],
+  },
 ]
 
 /**

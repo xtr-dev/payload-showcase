@@ -85,6 +85,11 @@ export interface Config {
     'channel-subscriptions': ChannelSubscription;
     'feature-flags': FeatureFlag;
     'experiment-events': ExperimentEvent;
+    products: Product;
+    categories: Category;
+    orders: Order;
+    carts: Cart;
+    coupons: Coupon;
     'studio-log': StudioLog;
     'automation-triggers': AutomationTrigger;
     'automation-steps': AutomationStep;
@@ -116,6 +121,11 @@ export interface Config {
     'channel-subscriptions': ChannelSubscriptionsSelect<false> | ChannelSubscriptionsSelect<true>;
     'feature-flags': FeatureFlagsSelect<false> | FeatureFlagsSelect<true>;
     'experiment-events': ExperimentEventsSelect<false> | ExperimentEventsSelect<true>;
+    products: ProductsSelect<false> | ProductsSelect<true>;
+    categories: CategoriesSelect<false> | CategoriesSelect<true>;
+    orders: OrdersSelect<false> | OrdersSelect<true>;
+    carts: CartsSelect<false> | CartsSelect<true>;
+    coupons: CouponsSelect<false> | CouponsSelect<true>;
     'studio-log': StudioLogSelect<false> | StudioLogSelect<true>;
     'automation-triggers': AutomationTriggersSelect<false> | AutomationTriggersSelect<true>;
     'automation-steps': AutomationStepsSelect<false> | AutomationStepsSelect<true>;
@@ -1668,6 +1678,267 @@ export interface ExperimentEvent {
   createdAt: string;
 }
 /**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "products".
+ */
+export interface Product {
+  id: number;
+  title: string;
+  /**
+   * One or two sentences for the product card.
+   */
+  summary?: string | null;
+  /**
+   * Leave empty to generate it from the title. Must be unique.
+   */
+  slug?: string | null;
+  description?: {
+    root: {
+      type: string;
+      children: {
+        type: any;
+        version: number;
+        [k: string]: unknown;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  } | null;
+  price: number;
+  /**
+   * Original price for showing discounts
+   */
+  compareAtPrice?: number | null;
+  /**
+   * Stock keeping unit
+   */
+  sku?: string | null;
+  barcode?: string | null;
+  inventory?: {
+    trackQuantity?: boolean | null;
+    quantity?: number | null;
+    /**
+     * Alert threshold for low stock
+     */
+    lowStockThreshold?: number | null;
+  };
+  images?: (number | Media)[] | null;
+  categories?: (number | Category)[] | null;
+  variants?:
+    | {
+        name: string;
+        sku?: string | null;
+        /**
+         * Price override for this variant
+         */
+        price?: number | null;
+        inventory?: number | null;
+        id?: string | null;
+      }[]
+    | null;
+  status: 'draft' | 'active' | 'archived';
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "categories".
+ */
+export interface Category {
+  id: number;
+  name: string;
+  /**
+   * Leave empty to generate it from the name. Must be unique.
+   */
+  slug?: string | null;
+  description?: string | null;
+  /**
+   * Parent category for nesting
+   */
+  parent?: (number | null) | Category;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "orders".
+ */
+export interface Order {
+  id: number;
+  orderNumber?: string | null;
+  /**
+   * User who placed the order (optional for guest orders)
+   */
+  user?: (number | null) | User;
+  /**
+   * Where to reach the customer about this order. Needed for a guest order, which has no user.
+   */
+  customerEmail?: string | null;
+  items: {
+    product: number | Product;
+    variant?: string | null;
+    quantity: number;
+    /**
+     * Price at time of purchase
+     */
+    price: number;
+    total: number;
+    id?: string | null;
+  }[];
+  subtotal: number;
+  tax?: number | null;
+  shipping?: number | null;
+  discount?: number | null;
+  /**
+   * Calculated on save: subtotal − discount + tax + shipping
+   */
+  total: number;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
+  paymentMethod?: string | null;
+  /**
+   * Payment gateway transaction ID
+   */
+  paymentId?: string | null;
+  shippingAddress: {
+    firstName: string;
+    lastName: string;
+    address1: string;
+    address2?: string | null;
+    city: string;
+    state?: string | null;
+    postalCode?: string | null;
+    country: string;
+    phone?: string | null;
+  };
+  /**
+   * Optional. createOrderFromCart copies the shipping address when none is given.
+   */
+  billingAddress?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+    phone?: string | null;
+  };
+  notes?: string | null;
+  /**
+   * On a new order the coupon is validated and sets the discount (or zeroes shipping for a free shipping coupon). Changing it later does not recalculate the order.
+   */
+  coupon?: (number | null) | Coupon;
+  /**
+   * Set by the plugin while this order holds stock. Cleared when the stock is put back on cancellation or refund.
+   */
+  inventoryReduced?: boolean | null;
+  /**
+   * Set by the plugin while this order counts as a use of its coupon. Cleared on cancellation or refund.
+   */
+  couponUsageCounted?: boolean | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "coupons".
+ */
+export interface Coupon {
+  id: number;
+  /**
+   * Stored in upper case; customers can enter it in any case
+   */
+  code: string;
+  /**
+   * Internal description
+   */
+  description?: string | null;
+  type: 'percentage' | 'fixed' | 'freeShipping';
+  /**
+   * Discount value (percentage or fixed amount). Not used for free shipping.
+   */
+  value?: number | null;
+  /**
+   * Minimum order amount required
+   */
+  minPurchase?: number | null;
+  /**
+   * Maximum discount cap
+   */
+  maxDiscount?: number | null;
+  /**
+   * Total usage limit (0 = unlimited)
+   */
+  usageLimit?: number | null;
+  /**
+   * Orders that currently use this coupon. Counted when an order is created and given back when it is cancelled or refunded.
+   */
+  usageCount?: number | null;
+  /**
+   * Per-customer usage limit (0 = unlimited)
+   */
+  customerLimit?: number | null;
+  /**
+   * Start date
+   */
+  validFrom?: string | null;
+  /**
+   * End date
+   */
+  validUntil?: string | null;
+  status: 'active' | 'inactive' | 'expired';
+  /**
+   * Specific products this coupon applies to (empty = all products)
+   */
+  appliesToProducts?: (number | Product)[] | null;
+  /**
+   * Specific categories this coupon applies to (empty = all categories)
+   */
+  appliesToCategories?: (number | Category)[] | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "carts".
+ */
+export interface Cart {
+  id: number;
+  /**
+   * Logged-in user (optional)
+   */
+  user?: (number | null) | User;
+  /**
+   * Session ID for guest users
+   */
+  sessionId?: string | null;
+  items?:
+    | {
+        product: number | Product;
+        variant?: string | null;
+        quantity: number;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Auto-calculated
+   */
+  subtotal?: number | null;
+  /**
+   * Set to 30 days after the cart was last changed. The cart helpers ignore a cart past this date.
+   */
+  expiresAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * Written by the automation workflows. Shown publicly on /showcase#automation.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1784,6 +2055,26 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'experiment-events';
         value: number | ExperimentEvent;
+      } | null)
+    | ({
+        relationTo: 'products';
+        value: number | Product;
+      } | null)
+    | ({
+        relationTo: 'categories';
+        value: number | Category;
+      } | null)
+    | ({
+        relationTo: 'orders';
+        value: number | Order;
+      } | null)
+    | ({
+        relationTo: 'carts';
+        value: number | Cart;
+      } | null)
+    | ({
+        relationTo: 'coupons';
+        value: number | Coupon;
       } | null)
     | ({
         relationTo: 'studio-log';
@@ -2215,6 +2506,157 @@ export interface ExperimentEventsSelect<T extends boolean = true> {
   variant?: T;
   type?: T;
   visitorId?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "products_select".
+ */
+export interface ProductsSelect<T extends boolean = true> {
+  title?: T;
+  summary?: T;
+  slug?: T;
+  description?: T;
+  price?: T;
+  compareAtPrice?: T;
+  sku?: T;
+  barcode?: T;
+  inventory?:
+    | T
+    | {
+        trackQuantity?: T;
+        quantity?: T;
+        lowStockThreshold?: T;
+      };
+  images?: T;
+  categories?: T;
+  variants?:
+    | T
+    | {
+        name?: T;
+        sku?: T;
+        price?: T;
+        inventory?: T;
+        id?: T;
+      };
+  status?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "categories_select".
+ */
+export interface CategoriesSelect<T extends boolean = true> {
+  name?: T;
+  slug?: T;
+  description?: T;
+  parent?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "orders_select".
+ */
+export interface OrdersSelect<T extends boolean = true> {
+  orderNumber?: T;
+  user?: T;
+  customerEmail?: T;
+  items?:
+    | T
+    | {
+        product?: T;
+        variant?: T;
+        quantity?: T;
+        price?: T;
+        total?: T;
+        id?: T;
+      };
+  subtotal?: T;
+  tax?: T;
+  shipping?: T;
+  discount?: T;
+  total?: T;
+  status?: T;
+  paymentStatus?: T;
+  paymentMethod?: T;
+  paymentId?: T;
+  shippingAddress?:
+    | T
+    | {
+        firstName?: T;
+        lastName?: T;
+        address1?: T;
+        address2?: T;
+        city?: T;
+        state?: T;
+        postalCode?: T;
+        country?: T;
+        phone?: T;
+      };
+  billingAddress?:
+    | T
+    | {
+        firstName?: T;
+        lastName?: T;
+        address1?: T;
+        address2?: T;
+        city?: T;
+        state?: T;
+        postalCode?: T;
+        country?: T;
+        phone?: T;
+      };
+  notes?: T;
+  coupon?: T;
+  inventoryReduced?: T;
+  couponUsageCounted?: T;
+  trackingNumber?: T;
+  trackingUrl?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "carts_select".
+ */
+export interface CartsSelect<T extends boolean = true> {
+  user?: T;
+  sessionId?: T;
+  items?:
+    | T
+    | {
+        product?: T;
+        variant?: T;
+        quantity?: T;
+        id?: T;
+      };
+  subtotal?: T;
+  expiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "coupons_select".
+ */
+export interface CouponsSelect<T extends boolean = true> {
+  code?: T;
+  description?: T;
+  type?: T;
+  value?: T;
+  minPurchase?: T;
+  maxDiscount?: T;
+  usageLimit?: T;
+  usageCount?: T;
+  customerLimit?: T;
+  validFrom?: T;
+  validUntil?: T;
+  status?: T;
+  appliesToProducts?: T;
+  appliesToCategories?: T;
   updatedAt?: T;
   createdAt?: T;
 }

@@ -3,6 +3,7 @@ import type { Payload } from 'payload'
 import { seedAutomation } from './automation'
 import { seedBilling } from './billing'
 import { resetCore, seedCore } from './core'
+import { seedEcommerce } from './ecommerce'
 import { seedFeatureFlags } from './featureFlags'
 import { seedMailing } from './mailing'
 import { seedNotifications } from './notifications'
@@ -11,7 +12,14 @@ import type { SeedContext } from './types'
 export type { SeedContext } from './types'
 
 /** Plugin seeds, run in this order after the core seed. One file per plugin. */
-const pluginSeeds = [seedBilling, seedMailing, seedNotifications, seedFeatureFlags, seedAutomation]
+const pluginSeeds = [
+  seedBilling,
+  seedMailing,
+  seedNotifications,
+  seedFeatureFlags,
+  seedEcommerce,
+  seedAutomation,
+]
 
 /**
  * Seeds the demo site. With `reset` (the default) all existing core data is removed first, so the
