@@ -1,4 +1,5 @@
 import { triggerWorkflowById } from '@xtr-dev/payload-automation/server'
+import { Cron } from 'croner'
 import { createLocalReq, Forbidden, type Payload } from 'payload'
 
 import { isAdminUser } from '@/access'
@@ -83,6 +84,71 @@ export const getRunSummary = async (
     .findByID({ collection: 'workflow-runs', id, depth: 1, overrideAccess: true })
     .catch(() => null)
   return run ? toSummary(run, { includeErrors }) : null
+}
+
+/** Where a scheduled workflow stands: its cron, when it runs next and when it last ran. */
+export interface ScheduleStatus {
+  workflowSlug: string
+  schedule: string
+  timezone: string | null
+  /** The next cron occurrence after `now`, or null when the expression has none. */
+  nextRunAt: string | null
+  /** Start of the workflow's latest run, whatever started it. */
+  lastRunAt: string | null
+  lastRunStatus: RunStatus | null
+}
+
+/**
+ * The schedule of a seeded workflow with a scheduled trigger, read from the stored trigger (so
+ * a schedule or timezone changed in the admin panel shows here). The next run is computed with
+ * croner, the cron library the plugin itself evaluates schedules with; the plugin fires it on the
+ * first scheduler tick after that time. Returns null when the workflow or its trigger is missing.
+ */
+export const getScheduleStatus = async (
+  payload: Payload,
+  slug: string,
+  now: Date = new Date(),
+): Promise<ScheduleStatus | null> => {
+  const { docs } = await payload.find({
+    collection: 'workflows',
+    where: { slug: { equals: slug } },
+    limit: 1,
+    depth: 1,
+    overrideAccess: true,
+    select: { triggers: true },
+  })
+  const workflow = docs[0]
+  const trigger = (workflow?.triggers ?? []).find(
+    (t) => typeof t === 'object' && t.type === 'scheduled' && t.schedule,
+  )
+  if (!workflow || typeof trigger !== 'object' || !trigger.schedule) return null
+
+  let nextRunAt: string | null = null
+  try {
+    const cron = new Cron(trigger.schedule, trigger.timezone ? { timezone: trigger.timezone } : {})
+    nextRunAt = cron.nextRun(now)?.toISOString() ?? null
+  } catch {
+    // The plugin rejects invalid schedules on save; a stored one that croner can't read has no
+    // next run to show.
+  }
+
+  const { docs: runs } = await payload.find({
+    collection: 'workflow-runs',
+    where: { workflow: { equals: workflow.id } },
+    sort: '-createdAt',
+    limit: 1,
+    depth: 0,
+    overrideAccess: true,
+    select: { startedAt: true, status: true },
+  })
+  return {
+    workflowSlug: slug,
+    schedule: trigger.schedule,
+    timezone: trigger.timezone ?? null,
+    nextRunAt,
+    lastRunAt: runs[0]?.startedAt ?? null,
+    lastRunStatus: runs[0]?.status ?? null,
+  }
 }
 
 /** The latest studio log entries (public read access applies). */

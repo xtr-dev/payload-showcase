@@ -116,7 +116,7 @@ beforeEach(() => {
 })
 
 describe('wiring', () => {
-  it('seeds the four code-defined workflows as read-only', async () => {
+  it('seeds the five code-defined workflows as read-only', async () => {
     const { docs } = await payload.find({ collection: 'workflows', limit: 10, depth: 1 })
     expect(docs.map((w) => w.slug).sort()).toEqual(Object.values(WORKFLOW_SLUGS).sort())
     expect(docs.every((w) => w.readOnly === true && w.enabled !== false)).toBe(true)
@@ -450,7 +450,7 @@ describe('run history', () => {
     expect((await payload.count({ collection: 'workflow-runs' })).totalDocs).toBe(0)
     expect((await payload.count({ collection: 'studio-log' })).totalDocs).toBe(0)
     // The workflows are code and survive the reset.
-    expect((await payload.count({ collection: 'workflows' })).totalDocs).toBe(4)
+    expect((await payload.count({ collection: 'workflows' })).totalDocs).toBe(5)
   })
 })
 

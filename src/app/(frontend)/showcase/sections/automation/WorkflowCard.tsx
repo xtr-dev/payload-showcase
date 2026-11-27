@@ -1,6 +1,8 @@
 import type { SeedWorkflow } from '@xtr-dev/payload-automation'
 
 import { Badge } from '@/components/ui'
+import type { ScheduleStatus } from '@/lib/automation'
+import { formatDate, formatTime } from '@/lib/format'
 import { KILN_ALERT_WEBHOOK_PATH } from '@/seed/automation'
 
 type SeedStep = SeedWorkflow['steps'][number]
@@ -30,6 +32,11 @@ const describeTrigger = (trigger: SeedTrigger): { kind: string; target: string }
       }
     case 'manual':
       return { kind: 'Manual', target: 'started from server code' }
+    case 'scheduled':
+      return {
+        kind: 'Schedule',
+        target: `cron ${p.schedule}${p.timezone ? ` (${p.timezone})` : ''}`,
+      }
     default:
       return { kind: trigger.type, target: '' }
   }
@@ -55,8 +62,19 @@ export const stepBatches = (steps: SeedStep[]): SeedStep[][] => {
   return batches
 }
 
-/** A seeded workflow drawn as trigger → condition → step batches. */
-export const WorkflowCard = ({ workflow }: { workflow: SeedWorkflow }) => {
+const when = (iso: string) => `${formatDate(iso)}, ${formatTime(iso)}`
+
+/**
+ * A seeded workflow drawn as trigger → condition → step batches. Scheduled workflows also get
+ * their next and last run, from the stored trigger and run history.
+ */
+export const WorkflowCard = ({
+  workflow,
+  schedule,
+}: {
+  workflow: SeedWorkflow
+  schedule?: ScheduleStatus | null
+}) => {
   const trigger = workflow.triggers[0]
   const { kind, target } = describeTrigger(trigger)
   return (
@@ -67,6 +85,21 @@ export const WorkflowCard = ({ workflow }: { workflow: SeedWorkflow }) => {
       </div>
       <p className="mt-1 text-sm text-ink-soft">{workflow.description}</p>
       <p className="mt-3 font-mono text-xs break-words text-ink">{target}</p>
+      {schedule && (
+        <dl
+          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs"
+          data-testid="workflow-schedule"
+        >
+          <dt className="font-semibold text-ink-soft">Next run</dt>
+          <dd className="text-ink">{schedule.nextRunAt ? when(schedule.nextRunAt) : 'none'}</dd>
+          <dt className="font-semibold text-ink-soft">Last run</dt>
+          <dd className="text-ink">
+            {schedule.lastRunAt
+              ? `${when(schedule.lastRunAt)} (${schedule.lastRunStatus ?? 'pending'})`
+              : 'not yet'}
+          </dd>
+        </dl>
+      )}
       {trigger.condition && (
         <p className="mt-1 text-xs text-ink-soft">
           <span className="font-semibold">only if </span>
