@@ -99,5 +99,6 @@ test.describe('Automation (payload-automation)', () => {
     const result = page.getByTestId('digest-result')
     await expect(result.getByText('Completed')).toBeVisible()
     await expect(result.getByText('Email digest · ok')).toBeVisible()
+    await expect(result.getByTestId('digest-emailed')).toHaveText('The digest was emailed to you.')
   })
 })

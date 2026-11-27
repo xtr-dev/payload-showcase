@@ -1,6 +1,6 @@
 import { getMailing, processEmails, renderTemplate, sendEmail } from '@xtr-dev/payload-mailing'
 import type { Payload, Where } from 'payload'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { MAIL_QUEUES, REMINDER_LEAD_MS, setNewsletterSubscription, TEMPLATES } from '@/lib/mailing'
 import { beginBookingCheckout } from '@/lib/checkout'
@@ -315,6 +315,37 @@ describe('newsletter', () => {
     expect((delivered.headers as Record<string, string>)['List-Unsubscribe']).toContain(
       '/account#settings',
     )
+  })
+
+  it('keeps an opt-in when its confirmation cannot be sent right away, and queues a retry', async () => {
+    // The mailing plugin delivers through the configured email adapter, not payload.sendEmail.
+    const send = vi.spyOn(payload.email, 'sendEmail').mockRejectedValue(new Error('SMTP is down'))
+    try {
+      await expect(setNewsletterSubscription(payload, mara, true)).resolves.toBeTruthy()
+    } finally {
+      send.mockRestore()
+    }
+
+    const [confirmation] = await emailsWhere({
+      recipient: { equals: mara.id },
+      templateSlug: { equals: TEMPLATES.newsletterSubscribed },
+      status: { not_equals: 'sent' },
+    })
+    expect(confirmation).toBeDefined()
+    expect(confirmation.status).toBe('pending')
+    // The plugin queued a retry job for it, which waits for retryDelay.
+    const { docs: jobs } = await payload.find({
+      collection: 'payload-jobs',
+      where: {
+        and: [
+          { taskSlug: { equals: 'process-email' } },
+          { completedAt: { exists: false } },
+          { 'input.emailId': { equals: String(confirmation.id) } },
+        ],
+      },
+      depth: 0,
+    })
+    expect(jobs.length).toBeGreaterThan(0)
   })
 })
 

@@ -1,10 +1,10 @@
-import { triggerWorkflowById } from '@xtr-dev/payload-automation/server'
+import { findStepResult, triggerWorkflowById } from '@xtr-dev/payload-automation/server'
 import { Cron } from 'croner'
 import { createLocalReq, Forbidden, type Payload } from 'payload'
 
 import { isAdminUser } from '@/access'
 import type { StudioLog, User, Workflow, WorkflowRun } from '@/payload-types'
-import { WORKFLOW_SLUGS } from '@/seed/automation'
+import { STUDIO_DIGEST_EMAIL_STEP, WORKFLOW_SLUGS } from '@/seed/automation'
 
 /**
  * Server-side helpers for the automation showcase: a public-safe view of workflow runs, the
@@ -22,7 +22,14 @@ export interface RunSummary {
   status: RunStatus
   startedAt: string | null
   durationMs: number | null
-  steps: Array<{ name: string; status: StepStatus; durationMs: number | null; error?: string }>
+  steps: Array<{
+    /** The step's slug; null on runs stored before payload-automation 0.4.0 recorded it. */
+    slug: string | null
+    name: string
+    status: StepStatus
+    durationMs: number | null
+    error?: string
+  }>
   /** Only filled in for admins: error messages can quote data from the run. */
   error?: string
 }
@@ -37,6 +44,7 @@ const toSummary = (run: WorkflowRun, { includeErrors }: { includeErrors: boolean
     startedAt: run.startedAt ?? null,
     durationMs: run.duration ?? null,
     steps: (run.stepResults ?? []).map((step) => ({
+      slug: step.slug ?? null,
       name: step.stepName ?? 'Step',
       status: step.status ?? 'pending',
       durationMs: step.duration ?? null,
@@ -67,7 +75,7 @@ export const getRecentRuns = async (
       startedAt: true,
       duration: true,
       error: true,
-      stepResults: { stepName: true, status: true, duration: true, error: true },
+      stepResults: { slug: true, stepName: true, status: true, duration: true, error: true },
     },
     populate: { workflows: { name: true, slug: true } },
   })
@@ -163,6 +171,11 @@ export const getStudioLog = async (payload: Payload, limit = 8): Promise<StudioL
   return docs
 }
 
+/** A finished studio digest run, and whether its email step sent the digest. */
+export interface StudioDigestRun extends RunSummary {
+  emailed: boolean
+}
+
 /**
  * Runs the "Studio digest" workflow through its manual trigger and returns the finished run.
  *
@@ -173,7 +186,7 @@ export const getStudioLog = async (payload: Payload, limit = 8): Promise<StudioL
 export const runStudioDigest = async (
   payload: Payload,
   user: User | null | undefined,
-): Promise<RunSummary> => {
+): Promise<StudioDigestRun> => {
   if (!user || !isAdminUser(user)) throw new Forbidden()
 
   const { docs } = await payload.find({
@@ -199,7 +212,11 @@ export const runStudioDigest = async (
   if (result.status === 'failed') {
     payload.logger.warn({ err: result.error, runId: result.runId }, 'Studio digest run failed')
   }
-  const summary = await getRunSummary(payload, result.runId, { includeErrors: true })
-  if (!summary) throw new Error('The studio digest did not record a run.')
-  return summary
+  const run = await payload
+    .findByID({ collection: 'workflow-runs', id: result.runId, depth: 1, overrideAccess: true })
+    .catch(() => null)
+  if (!run) throw new Error('The studio digest did not record a run.')
+  // The email step is looked up by its slug, so renaming the step in the seed doesn't break this.
+  const email = findStepResult(run.stepResults, STUDIO_DIGEST_EMAIL_STEP)
+  return { ...toSummary(run, { includeErrors: true }), emailed: email?.status === 'succeeded' }
 }
