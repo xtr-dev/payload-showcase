@@ -54,7 +54,7 @@ export const MailingShowcase = async () => {
       title="Emails from templates"
       intro="Booking confirmations, class reminders, a welcome email and a monthly newsletter, written as rich-text templates in the admin panel and delivered through Payload’s job queue."
       features={[
-        'Five Liquid templates with variables, filters and conditionals, wrapped in a shared Kiln & Co. layout',
+        'Six Liquid templates with variables, filters and conditionals, wrapped in a shared Kiln & Co. layout',
         'Rich-text template editing in the admin panel, with a live preview from sample variables',
         'Booking confirmations sent from site code with sendEmail when payment settles, on their own priority queue',
         'Class reminders scheduled 24 hours before each session, and the newsletter scheduled for the 1st of the month',

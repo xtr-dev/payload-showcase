@@ -167,6 +167,7 @@ export interface Config {
       'update-document': TaskUpdateDocument;
       'delete-document': TaskDeleteDocument;
       'send-email': TaskSendEmail;
+      'cancel-stale-orders': TaskCancelStaleOrders;
       'automation-scheduled-triggers': TaskAutomationScheduledTriggers;
       inline: {
         input: unknown;
@@ -1069,6 +1070,7 @@ export interface Email {
   jobs?: (number | PayloadJob)[] | null;
   booking?: (number | null) | Booking;
   recipient?: (number | null) | User;
+  order?: (number | null) | Order;
   updatedAt: string;
   createdAt: string;
 }
@@ -1135,6 +1137,7 @@ export interface PayloadJob {
           | 'update-document'
           | 'delete-document'
           | 'send-email'
+          | 'cancel-stale-orders'
           | 'automation-scheduled-triggers';
         taskID: string;
         input?:
@@ -1180,6 +1183,7 @@ export interface PayloadJob {
         | 'update-document'
         | 'delete-document'
         | 'send-email'
+        | 'cancel-stale-orders'
         | 'automation-scheduled-triggers'
       )
     | null;
@@ -1348,7 +1352,7 @@ export interface AutomationTrigger {
   /**
    * The collection to watch for events
    */
-  collectionSlug?: 'bookings' | null;
+  collectionSlug?: ('bookings' | 'orders') | null;
   /**
    * The specific hook event to listen for
    */
@@ -1434,7 +1438,13 @@ export interface AutomationStep {
    * The type of action this step performs
    */
   type:
-    'http-request-step' | 'create-document' | 'read-document' | 'update-document' | 'delete-document' | 'send-email';
+    | 'http-request-step'
+    | 'create-document'
+    | 'read-document'
+    | 'update-document'
+    | 'delete-document'
+    | 'send-email'
+    | 'cancel-stale-orders';
   /**
    * Step configuration in JSON format. String values can use JSONata expressions for dynamic data (e.g., "trigger.doc.id")
    */
@@ -1731,7 +1741,7 @@ export interface Notification {
   /**
    * The notification channel - only subscribers to this channel will receive the notification
    */
-  channel?: ('bookings' | 'class-reminders' | 'studio-news') | null;
+  channel?: ('bookings' | 'orders' | 'class-reminders' | 'studio-news') | null;
   /**
    * Whether the recipient has read this notification. For broadcasts, reads return the requesting user's own read state.
    */
@@ -1744,7 +1754,11 @@ export interface Notification {
    * The booking this notification is about.
    */
   booking?: (number | null) | Booking;
-  event?: ('booking-confirmed' | 'booking-refunded') | null;
+  event?: ('booking-confirmed' | 'booking-refunded' | 'order-shipped') | null;
+  /**
+   * The shop order this notification is about.
+   */
+  order?: (number | null) | Order;
   updatedAt: string;
   createdAt: string;
 }
@@ -1779,7 +1793,7 @@ export interface PushSubscription {
   /**
    * Channels this subscription is subscribed to - leave empty for all notifications
    */
-  channels?: ('bookings' | 'class-reminders' | 'studio-news')[] | null;
+  channels?: ('bookings' | 'orders' | 'class-reminders' | 'studio-news')[] | null;
   /**
    * Whether this subscription is still active
    */
@@ -1810,7 +1824,7 @@ export interface NotificationRead {
 export interface ChannelSubscription {
   id: number;
   user: number | User;
-  channel: 'bookings' | 'class-reminders' | 'studio-news';
+  channel: 'bookings' | 'orders' | 'class-reminders' | 'studio-news';
   /**
    * Unchecked means the user opted out of this channel.
    */
@@ -1955,7 +1969,7 @@ export interface StudioLog {
    * Public text: keep member names, emails and references out of it.
    */
   message?: string | null;
-  source: 'booking' | 'webhook' | 'settings' | 'manual' | 'schedule';
+  source: 'booking' | 'webhook' | 'settings' | 'manual' | 'schedule' | 'order';
   severity: 'info' | 'warning';
   /**
    * The booking this entry is about, if any.
@@ -2418,6 +2432,7 @@ export interface EmailsSelect<T extends boolean = true> {
   jobs?: T;
   booking?: T;
   recipient?: T;
+  order?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -2435,6 +2450,7 @@ export interface NotificationsSelect<T extends boolean = true> {
   readAt?: T;
   booking?: T;
   event?: T;
+  order?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -3522,6 +3538,30 @@ export interface TaskSendEmail {
      * Response from the mail server
      */
     response?: string | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskCancel-stale-orders".
+ */
+export interface TaskCancelStaleOrders {
+  input: {
+    /**
+     * Cancel pending orders placed more than this many minutes ago.
+     */
+    olderThanMinutes?: number | null;
+  };
+  output: {
+    cancelled?: number | null;
+    orderNumbers?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
   };
 }
 /**

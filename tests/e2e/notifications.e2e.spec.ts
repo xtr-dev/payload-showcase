@@ -61,6 +61,7 @@ test.describe('Notifications (payload-notifications)', () => {
     expect(mine.status()).toBe(200)
     expect((await mine.json()).channels).toEqual([
       expect.objectContaining({ id: 'bookings', subscribed: true }),
+      expect.objectContaining({ id: 'orders', subscribed: true }),
       expect.objectContaining({ id: 'class-reminders', subscribed: true }),
       expect.objectContaining({ id: 'studio-news', subscribed: false }),
     ])

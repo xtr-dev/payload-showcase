@@ -45,6 +45,14 @@ export const FLAG_SEEDS: FlagSeed[] = [
     rolloutPercentage: 100,
     tags: [{ tag: 'release' }, { tag: 'shop' }],
   },
+  {
+    name: 'shop-free-shipping-banner',
+    description:
+      'Shows a promo banner on /shop that gives away the FREESHIP code. Switch it off to end the promotion; the code itself is a coupon under Shop → Coupons.',
+    enabled: true,
+    rolloutPercentage: 100,
+    tags: [{ tag: 'promo' }, { tag: 'shop' }],
+  },
 ]
 
 /**

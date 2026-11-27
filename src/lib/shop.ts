@@ -5,14 +5,27 @@ import {
   // react-hooks lint rule from treating these plain server functions as components.
   useEcommerce as ecommerceHelpers,
 } from '@xtr-dev/payload-ecommerce'
+import { sendEmail } from '@xtr-dev/payload-mailing'
 import { createHmac, timingSafeEqual } from 'crypto'
-import type { Payload } from 'payload'
+import type { Payload, PayloadRequest } from 'payload'
 
-import type { Cart, Category, Coupon, Media, Order, Product, User } from '@/payload-types'
+import type {
+  Cart,
+  Category,
+  Coupon,
+  Email,
+  Media,
+  Notification,
+  Order,
+  Product,
+  User,
+} from '@/payload-types'
 import { checkoutProvider } from '@/plugins/billing'
 
 import { paymentLink, siteOrigin } from './checkout'
 import { asMedia, formatPrice } from './format'
+import { MAIL_QUEUES, siteUrl, TEMPLATES } from './mailing'
+import { notifyMember } from './notifications'
 
 /**
  * The studio shop's storefront logic, built on @xtr-dev/payload-ecommerce.
@@ -26,6 +39,10 @@ import { asMedia, formatPrice } from './format'
  * Checkout (`placeOrder`) creates the order from that cart with the plugin, which prices the lines
  * and applies the coupon itself, and then starts a payment through @xtr-dev/payload-billing. A
  * guest reaches their order afterwards with a signed token in the order page's URL.
+ *
+ * Once an order is paid its customer gets a confirmation email, a member is told in their inbox
+ * when it ships, and orders left unpaid are cancelled by `cancelStaleOrders`; the hooks and the
+ * workflow step that call these live in src/plugins/ecommerce.ts.
  *
  * Nothing here reads cookies or imports the Payload config, so the integration tests call these
  * functions directly; the server actions in src/components/shop/actions.ts are thin wrappers.
@@ -755,4 +772,140 @@ export const restoreCartFromOrder = async (
     }
   }
   return restored
+}
+
+/**
+ * Sends the order confirmation, rendered from the `order-confirmation` template, to the email on
+ * the order (the member's, or the one a guest gave at checkout). The link in it carries the
+ * order's token. Goes out on the priority mail queue, like booking confirmations. Returns the
+ * queued `emails` document.
+ */
+export const sendOrderConfirmation = async (
+  payload: Payload,
+  order: Order | number,
+  { processImmediately = false }: { processImmediately?: boolean } = {},
+): Promise<Email> => {
+  const doc = await payload.findByID({
+    collection: 'orders',
+    id: typeof order === 'number' ? order : order.id,
+    depth: 1,
+  })
+  if (!doc.customerEmail || !doc.orderNumber) {
+    throw new Error(`Order ${doc.id} has no email address to confirm to`)
+  }
+  const address = doc.shippingAddress
+  return sendEmail<Email>(payload, {
+    template: {
+      slug: TEMPLATES.orderConfirmation,
+      variables: {
+        siteUrl: siteUrl(),
+        preheader: `Order ${doc.orderNumber} is paid. We are wrapping it now.`,
+        firstName: address?.firstName ?? 'there',
+        orderNumber: doc.orderNumber,
+        orderToken: orderToken(payload, doc.orderNumber),
+        items: doc.items.map((item) => `${item.quantity} × ${orderLineLabel(item)}`).join(', '),
+        // In euros: the template formats them with the plugin's `formatCurrency` filter.
+        shipping: (doc.shipping ?? 0) / 100,
+        discount: (doc.discount ?? 0) / 100,
+        total: doc.total / 100,
+        shipTo: [
+          `${address?.firstName} ${address?.lastName}`,
+          address?.address1,
+          `${address?.postalCode} ${address?.city}`,
+        ].join(', '),
+      },
+    },
+    data: {
+      to: [doc.customerEmail],
+      priority: 1,
+      order: doc.id,
+      recipient: relId(doc.user),
+    },
+    queue: MAIL_QUEUES.priority,
+    processImmediately,
+  })
+}
+
+/**
+ * Tells the member who placed an order that it has shipped, on the Orders channel. Sent at most
+ * once per order, also when an admin moves it back and to "shipped" again. Guests have no inbox,
+ * so a guest order sends nothing. Returns the notification, or null when nothing was sent.
+ */
+export const notifyOrderShipped = async (
+  payload: Payload,
+  order: Order,
+  { req }: { req?: PayloadRequest } = {},
+): Promise<Notification | null> => {
+  const memberId = relId(order.user)
+  if (order.status !== 'shipped' || !memberId) return null
+  const { totalDocs } = await payload.count({
+    collection: 'notifications',
+    where: { and: [{ order: { equals: order.id } }, { event: { equals: 'order-shipped' } }] },
+    req,
+  })
+  if (totalDocs > 0) return null
+  return notifyMember(payload, memberId, {
+    channel: 'orders',
+    order: order.id,
+    event: 'order-shipped',
+    title: 'Your order has shipped',
+    message: `Order ${order.orderNumber} left the studio today${order.trackingNumber ? ` (tracking ${order.trackingNumber})` : ''}. Unwrap it carefully: there is a lot of paper.`,
+    req,
+  })
+}
+
+/** How long an order may wait for its payment before `cancelStaleOrders` releases it. */
+export const STALE_ORDER_MINUTES = 30
+
+/**
+ * Cancels orders that were placed more than `olderThanMinutes` ago and never paid, so the stock
+ * they hold goes back on sale (the plugin restocks a cancelled order and gives its coupon use
+ * back). Their pending payments are marked cancelled too, which stops "Pay now" from being
+ * offered for them. An order whose payment the provider is still processing is left alone.
+ * Returns the numbers of the orders it cancelled.
+ */
+export const cancelStaleOrders = async (
+  payload: Payload,
+  { olderThanMinutes = STALE_ORDER_MINUTES, now = new Date() } = {},
+): Promise<string[]> => {
+  const { orders } = ecommerceHelpers(payload)
+  const { docs } = await payload.find({
+    collection: 'orders',
+    where: {
+      and: [
+        { status: { equals: 'pending' } },
+        { paymentStatus: { equals: 'pending' } },
+        {
+          createdAt: {
+            less_than: new Date(now.getTime() - olderThanMinutes * 60_000).toISOString(),
+          },
+        },
+      ],
+    },
+    sort: 'createdAt',
+    limit: 50,
+    depth: 0,
+  })
+  const cancelled: string[] = []
+  for (const order of docs) {
+    const { docs: payments } = await payload.find({
+      collection: 'payments',
+      where: {
+        and: [{ order: { equals: order.id } }, { status: { in: ['pending', 'processing'] } }],
+      },
+      depth: 0,
+      limit: 10,
+    })
+    if (payments.some((payment) => payment.status === 'processing')) continue
+    await orders.updateOrderStatus({ orderId: order.id, status: 'cancelled' })
+    for (const payment of payments) {
+      await payload.update({
+        collection: 'payments',
+        id: payment.id,
+        data: { status: 'canceled' },
+      })
+    }
+    cancelled.push(order.orderNumber ?? String(order.id))
+  }
+  return cancelled
 }

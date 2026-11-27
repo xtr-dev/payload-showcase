@@ -22,11 +22,12 @@ export const TEMPLATES = {
   welcome: 'welcome',
   newsletter: 'newsletter',
   newsletterSubscribed: 'newsletter-subscribed',
+  orderConfirmation: 'order-confirmation',
 } as const
 
 /**
- * Job queues used for mail. Ordinary sends use `mail` (the plugin's `queue` option); booking
- * confirmations are routed to `mail-priority` per send. Both are drained by `jobs.autoRun`.
+ * Job queues used for mail. Ordinary sends use `mail` (the plugin's `queue` option); booking and
+ * shop order confirmations are routed to `mail-priority` per send. Both are drained by `jobs.autoRun`.
  */
 export const MAIL_QUEUES = { default: 'mail', priority: 'mail-priority' } as const
 

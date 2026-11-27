@@ -19,10 +19,12 @@ import {
   STEP_RETRIES,
 } from '@/seed/automation'
 
+import { CancelStaleOrdersStepTask } from './ecommerce'
+
 /**
  * @xtr-dev/payload-automation
  *
- * Five code-defined workflows (see src/seed/automation.ts):
+ * Seven code-defined workflows (see src/seed/automation.ts):
  * - "Booking confirmed": a bookings afterChange hook with a JSONata condition; reads the session,
  *   workshop and member, emails a confirmation and writes a studio log entry.
  * - "Kiln temperature alert": a webhook trigger with a hashed secret; calls the site's mock pager
@@ -32,6 +34,11 @@ import {
  * - "Morning kiln-room report": a scheduled (cron) trigger, every morning at 07:00 studio time;
  *   fired by the plugin's `automation-scheduled-triggers` job task on the `automation` queue,
  *   which `automationJobs` below runs every minute.
+ * - "Shop order paid": an orders afterChange hook; logs the order and, when a product in it is
+ *   down to its low-stock threshold, warns the admin in their inbox.
+ * - "Release unpaid orders": a scheduled trigger every 15 minutes with a custom step
+ *   (`CancelStaleOrdersStepTask` from src/plugins/ecommerce.ts) that cancels shop orders left
+ *   unpaid for 30 minutes, so their stock goes back on sale.
  *
  * Env: AUTOMATION_WEBHOOK_SECRET (the kiln alert webhook secret) and, optionally,
  * PUBLIC_KILN_PAGER_URL (where the alert workflow's HTTP step posts; defaults to this site).
@@ -81,6 +88,7 @@ export const StudioLog: CollectionConfig = {
             { label: 'Site settings', value: 'settings' },
             { label: 'Manual run', value: 'manual' },
             { label: 'Schedule', value: 'schedule' },
+            { label: 'Shop order', value: 'order' },
           ],
         },
         {
@@ -235,7 +243,7 @@ export const automation: Plugin[] = [
   studioLogPlugin,
   pagerUrlPlugin,
   workflowsPlugin({
-    collectionTriggers: { bookings: { afterChange: true } },
+    collectionTriggers: { bookings: { afterChange: true }, orders: { afterChange: true } },
     globalTriggers: { 'site-settings': { afterChange: true } },
     steps: [
       HttpRequestStepTask,
@@ -244,6 +252,7 @@ export const automation: Plugin[] = [
       UpdateDocumentStepTask,
       DeleteDocumentStepTask,
       SendEmailStepTask,
+      CancelStaleOrdersStepTask,
     ],
     seedWorkflows: automationWorkflows({ webhookSecret }),
     // Runs store `users:<id>` as triggeredBy instead of an email, and keep the acting user out of

@@ -97,7 +97,7 @@ const sampleBooking = {
   paid: true,
 }
 
-/** The five templates. Editors can change all of them under Mailing → Email Templates. */
+/** The six templates. Editors can change all of them under Mailing → Email Templates. */
 const templates = (featured: Workshop | undefined) => [
   {
     name: 'Booking confirmation',
@@ -227,6 +227,45 @@ const templates = (featured: Workshop | undefined) => [
       nextIssue: '2026-12-01T08:00:00.000Z',
     },
   },
+  {
+    // Sent by sendOrderConfirmation (src/lib/shop.ts) when a shop order is paid. Amounts are in
+    // euros; the link carries the order's token, so a guest can open their order from the email.
+    name: 'Shop order confirmation',
+    slug: TEMPLATES.orderConfirmation,
+    subject: 'Your Kiln & Co. order {{ orderNumber }}',
+    content: doc(
+      { h: 'Thank you, {{ firstName }}' },
+      ['Your order ', { b: '{{ orderNumber }}' }, ' is paid, and we are wrapping it now.'],
+      {
+        ul: [
+          'Items: {{ items }}',
+          'Shipping: {% if shipping > 0 %}{{ shipping | formatCurrency }}{% else %}free{% endif %}',
+          'Total: {{ total | formatCurrency }} including 21% VAT{% if discount > 0 %}, after {{ discount | formatCurrency }} discount{% endif %}',
+          'Ships to: {{ shipTo }}',
+        ],
+      },
+      [
+        {
+          a: 'Follow your order',
+          href: '{{siteUrl}}/shop/orders/{{orderNumber}}?t={{orderToken}}',
+        },
+      ],
+      'Every piece is wrapped by hand and posted within three working days.',
+    ),
+    variables: required('firstName', 'orderNumber', 'items', 'total', 'orderToken'),
+    sampleVariables: {
+      siteUrl: 'http://localhost:3000',
+      preheader: 'Your order is paid and on its way to the packing table.',
+      firstName: 'Mara',
+      orderNumber: 'ORD-1764000000000-042',
+      orderToken: '0000000000000000000000000000000000000000',
+      items: '2 × Speckled mug (Celadon), 1 × Breakfast bowl',
+      shipping: 0,
+      discount: 9,
+      total: 81,
+      shipTo: 'Mara de Vries, Strandweg 12, 2042 AA Zandvoort',
+    },
+  },
 ]
 
 /** 09:00 studio time (08:00 UTC in winter) on the first day of next month. */
@@ -234,7 +273,7 @@ export const nextNewsletterDate = (now = new Date()): Date =>
   new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 8, 0, 0))
 
 /**
- * Seeds the mailing integration: the five templates, a welcome email for each member and a
+ * Seeds the mailing integration: the six templates, a welcome email for each member and a
  * confirmation for each paid seeded booking (sent immediately, so the outbox has something to show),
  * class reminders scheduled 24 hours before each session, and next month's newsletter scheduled
  * for the subscribers (Mara subscribes, Jonas doesn't).

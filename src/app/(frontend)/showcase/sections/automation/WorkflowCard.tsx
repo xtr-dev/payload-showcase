@@ -15,6 +15,7 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   'delete-document': 'Delete document',
   'send-email': 'Send email',
   'http-request-step': 'HTTP request',
+  'cancel-stale-orders': 'Custom step',
 }
 
 /** "Collection hook · bookings.afterChange" and friends, from a seeded trigger definition. */

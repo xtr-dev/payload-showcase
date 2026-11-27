@@ -139,7 +139,9 @@ export default async function OrderPage({
             </dd>
           </div>
           <div>
-            <dt className="text-ink-soft">Email</dt>
+            <dt className="text-ink-soft">
+              {order.paymentStatus === 'paid' ? 'Confirmation sent to' : 'Email'}
+            </dt>
             <dd className="font-semibold break-all">{order.customerEmail}</dd>
             {order.trackingNumber && (
               <>
@@ -198,7 +200,7 @@ export default async function OrderPage({
 
       <p className="mt-6 text-sm text-ink-soft">
         Orders on this demo are created by{' '}
-        <Link href="/showcase" className="font-medium text-clay hover:underline">
+        <Link href="/showcase#ecommerce" className="font-medium text-clay hover:underline">
           payload-ecommerce
         </Link>{' '}
         and paid through payload-billing

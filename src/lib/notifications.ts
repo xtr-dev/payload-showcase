@@ -28,7 +28,7 @@ import { richText, type RichTextValue } from './richtext'
  */
 
 /** Channel ids, shared by the plugin config and the UI. */
-export type ChannelId = 'bookings' | 'studio-news' | 'class-reminders'
+export type ChannelId = 'bookings' | 'orders' | 'studio-news' | 'class-reminders'
 
 export interface ChannelDefinition {
   id: ChannelId
@@ -43,6 +43,12 @@ export const CHANNELS: ChannelDefinition[] = [
     id: 'bookings',
     name: 'Bookings',
     description: 'Confirmations and changes to your own bookings. Always on.',
+    optional: false,
+  },
+  {
+    id: 'orders',
+    name: 'Orders',
+    description: 'Updates about your own shop orders. Always on.',
     optional: false,
   },
   {
@@ -127,6 +133,8 @@ export interface NotifyOptions {
   req?: PayloadRequest
   /** The booking this notification is about, if any. */
   booking?: number
+  /** The shop order this notification is about, if any. */
+  order?: number
   /** What happened, for notifications that must be sent at most once (see notifyBookingStatus). */
   event?: NonNullable<Notification['event']>
 }
@@ -140,7 +148,7 @@ export interface NotifyOptions {
 export const notifyMember = (
   payload: Payload,
   userId: number | string,
-  { title, message, channel = 'bookings', req, booking, event }: NotifyOptions,
+  { title, message, channel = 'bookings', req, booking, order, event }: NotifyOptions,
 ): Promise<Notification> =>
   payload.create({
     collection: 'notifications',
@@ -151,6 +159,7 @@ export const notifyMember = (
       recipient: Number(userId),
       audience: 'user',
       booking,
+      order,
       event,
     },
     req,

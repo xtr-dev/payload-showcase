@@ -16,7 +16,7 @@ test.describe('Automation (payload-automation)', () => {
     await page.goto('/showcase#automation')
     const section = page.locator('#automation')
     await expect(section.getByText('Live', { exact: true })).toBeVisible()
-    await expect(section.getByTestId('workflow-card')).toHaveCount(5)
+    await expect(section.getByTestId('workflow-card')).toHaveCount(7)
     // The scheduled workflow shows when it runs next.
     await expect(section.getByTestId('workflow-schedule')).toContainText('Next run')
     // Visitors don't get the manual run button.

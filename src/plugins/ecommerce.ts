@@ -1,12 +1,19 @@
 import { refundPayment } from '@xtr-dev/payload-billing'
 import { payloadEcommerce, type CollectionExtender } from '@xtr-dev/payload-ecommerce'
-import type { CollectionAfterChangeHook, Endpoint, Plugin } from 'payload'
+import type { CollectionAfterChangeHook, Endpoint, Payload, Plugin, TaskConfig } from 'payload'
 
 import { getUser, isAdminUser } from '@/access'
+import { TEMPLATES } from '@/lib/mailing'
+import {
+  cancelStaleOrders,
+  notifyOrderShipped,
+  sendOrderConfirmation,
+  STALE_ORDER_MINUTES,
+} from '@/lib/shop'
 import type { Order, Payment } from '@/payload-types'
 
 import { SKIP_BILLING_SYNC } from './billing'
-import { extendCollection } from './utils'
+import { addFields, extendCollection } from './utils'
 
 /**
  * @xtr-dev/payload-ecommerce
@@ -26,6 +33,10 @@ import { extendCollection } from './utils'
  *   payment's status changes drive the order (`pending → processing`, `cancelled` when the payment
  *   fails, `refunded` on a full refund). The plugin puts stock and the coupon use back whenever an
  *   order becomes cancelled or refunded.
+ * - Tie-ins with the other plugins hang off the order's own status: a paid order is confirmed by
+ *   email (mailing), a shipped one is announced in the member's inbox (notifications), and two
+ *   automation workflows (src/seed/automation.ts) log paid orders with a low-stock warning and
+ *   release orders that were never paid.
  */
 
 const relId = (value: unknown): number | undefined => {
@@ -111,10 +122,61 @@ const refundOrderEndpoint: Endpoint = {
   },
 }
 
-/** Orders get the refund endpoint and its button in the admin sidebar. */
+/** A paid order is confirmed once: a later status change never sends the email again. */
+const hasConfirmation = async (payload: Payload, orderId: number): Promise<boolean> => {
+  const { totalDocs } = await payload.count({
+    collection: 'emails',
+    where: { order: { equals: orderId }, templateSlug: { equals: TEMPLATES.orderConfirmation } },
+  })
+  return totalDocs > 0
+}
+
+/**
+ * What customers hear about their order, sent from the order's own status changes so it does not
+ * matter who made them (the payment sync, an admin, a workflow):
+ *
+ * - `paymentStatus` becomes `paid`: the confirmation email, to members and guests alike.
+ * - `status` becomes `shipped`: an inbox notification for the member (guests have no inbox).
+ *
+ * This is the site's own hook rather than the plugin's `afterCreateOrder`, which runs before
+ * payment and fails the order when it throws. Problems here are logged and never block the order.
+ * Set `context: { skipMail: true }` or `{ skipNotifications: true }` on a write to stay quiet.
+ */
+const orderMessages: CollectionAfterChangeHook<Order> = async ({
+  doc,
+  previousDoc,
+  operation,
+  req,
+}) => {
+  const { payload, context } = req
+  const was = operation === 'create' ? undefined : previousDoc
+  try {
+    if (
+      !context.skipMail &&
+      doc.paymentStatus === 'paid' &&
+      was?.paymentStatus !== 'paid' &&
+      doc.customerEmail &&
+      !(await hasConfirmation(payload, doc.id))
+    ) {
+      await sendOrderConfirmation(payload, doc)
+    }
+    if (!context.skipNotifications && doc.status === 'shipped' && was?.status !== 'shipped') {
+      await notifyOrderShipped(payload, doc, { req })
+    }
+  } catch (error) {
+    payload.logger.error({ err: error, msg: `Messages for order ${doc.orderNumber} failed` })
+  }
+  return doc
+}
+
+/** Orders get the refund endpoint, its button in the admin sidebar and the customer messages. */
 const extendOrders: CollectionExtender = (collection) => ({
   ...inShopGroup(collection),
   endpoints: [...(collection.endpoints || []), refundOrderEndpoint],
+  hooks: {
+    ...collection.hooks,
+    afterChange: [...(collection.hooks?.afterChange ?? []), orderMessages],
+  },
   fields: [
     ...collection.fields,
     {
@@ -151,6 +213,7 @@ const syncOrder: CollectionAfterChangeHook<Payment> = async ({
   if (!orderId) return doc
 
   const order = await req.payload.findByID({ collection: 'orders', id: orderId, depth: 0, req })
+  const unpaid = doc.status === 'failed' || doc.status === 'canceled'
   let next: Partial<
     Pick<Order, 'status' | 'paymentStatus' | 'paymentMethod' | 'paymentId'>
   > | null = null
@@ -161,13 +224,40 @@ const syncOrder: CollectionAfterChangeHook<Payment> = async ({
       paymentMethod: doc.provider,
       paymentId: doc.providerId,
     }
-  } else if ((doc.status === 'failed' || doc.status === 'canceled') && order.status === 'pending') {
+  } else if (unpaid && order.status === 'pending') {
     next = { status: 'cancelled', paymentStatus: 'failed' }
   } else if (doc.status === 'refunded' && order.paymentStatus === 'paid') {
     // A partial refund (e.g. a goodwill discount) leaves the order as it is.
     next = { status: 'refunded', paymentStatus: 'refunded' }
   }
   if (next) await req.payload.update({ collection: 'orders', id: orderId, data: next, req })
+
+  // Nobody will pay this invoice any more: an order is not retried, a new cart makes a new order.
+  const invoiceId = relId(doc.invoice)
+  if (unpaid && invoiceId) {
+    await req.payload.update({
+      collection: 'invoices',
+      where: { and: [{ id: { equals: invoiceId } }, { status: { equals: 'open' } }] },
+      data: { status: 'void' },
+      req,
+    })
+  }
+
+  // Money arrived for an order that was cancelled in the meantime (it sat unpaid for too long
+  // and its stock was released): the order cannot be honoured, so the payment is sent back.
+  if (doc.status === 'succeeded' && order.status === 'cancelled') {
+    req.payload.logger.warn(
+      `Payment ${doc.id} arrived for cancelled order ${order.orderNumber}; refunding it`,
+    )
+    await refundPayment(req.payload, {
+      paymentId: doc.id,
+      reason: 'other',
+      description: `Order ${order.orderNumber} was cancelled before its payment arrived`,
+      idempotencyKey: `late-payment-${doc.id}`,
+    }).catch((error) => {
+      req.payload.logger.error({ err: error, msg: `Refund of late payment ${doc.id} failed` })
+    })
+  }
   return doc
 }
 
@@ -190,6 +280,74 @@ const extendPayments = extendCollection('payments', (collection) => ({
   },
 }))
 
+/**
+ * Emails and notifications can point at the shop order they are about, so each is sent once per
+ * order, and "Order shipped" joins the notification events.
+ */
+const linkMessagesToOrders: Plugin[] = [
+  addFields('emails', [
+    {
+      name: 'order',
+      type: 'relationship',
+      relationTo: 'orders',
+      index: true,
+      admin: { position: 'sidebar', readOnly: true },
+    },
+  ]),
+  extendCollection('notifications', (collection) => ({
+    ...collection,
+    fields: [
+      ...collection.fields.map((field) =>
+        'name' in field && field.name === 'event' && field.type === 'select'
+          ? {
+              ...field,
+              options: [...field.options, { label: 'Order shipped', value: 'order-shipped' }],
+            }
+          : field,
+      ),
+      {
+        name: 'order',
+        type: 'relationship',
+        relationTo: 'orders',
+        index: true,
+        admin: { position: 'sidebar', description: 'The shop order this notification is about.' },
+      },
+    ],
+  })),
+]
+
+/**
+ * A custom payload-automation step: cancels shop orders that have waited longer than
+ * `olderThanMinutes` for their payment (see `cancelStaleOrders`). The "Release unpaid orders"
+ * workflow in src/seed/automation.ts runs it on a schedule; src/plugins/automation.ts registers
+ * it next to the plugin's built-in steps. A step is an ordinary Payload jobs task that returns
+ * `output` and `state`.
+ */
+export const CANCEL_STALE_ORDERS_STEP = 'cancel-stale-orders' as const
+
+export const CancelStaleOrdersStepTask: TaskConfig<'cancel-stale-orders'> = {
+  slug: CANCEL_STALE_ORDERS_STEP,
+  inputSchema: [
+    {
+      name: 'olderThanMinutes',
+      type: 'number',
+      min: 1,
+      admin: { description: 'Cancel pending orders placed more than this many minutes ago.' },
+    },
+  ],
+  outputSchema: [
+    { name: 'cancelled', type: 'number' },
+    { name: 'orderNumbers', type: 'json' },
+  ],
+  handler: async ({ input, req }) => {
+    const minutes = Number(input?.olderThanMinutes)
+    const orderNumbers = await cancelStaleOrders(req.payload, {
+      olderThanMinutes: Number.isFinite(minutes) && minutes >= 1 ? minutes : STALE_ORDER_MINUTES,
+    })
+    return { output: { cancelled: orderNumbers.length, orderNumbers }, state: 'succeeded' }
+  },
+}
+
 export const ecommerce: Plugin[] = [
   payloadEcommerce({
     userCollection: 'users',
@@ -205,4 +363,5 @@ export const ecommerce: Plugin[] = [
     },
   }),
   extendPayments,
+  ...linkMessagesToOrders,
 ]

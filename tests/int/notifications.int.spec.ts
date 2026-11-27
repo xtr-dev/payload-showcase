@@ -90,6 +90,7 @@ describe('Notifications (payload-notifications)', () => {
     )
     expect(channel && 'options' in channel && channel.options).toEqual([
       { label: 'Bookings', value: 'bookings' },
+      { label: 'Orders', value: 'orders' },
       { label: 'Class reminders', value: 'class-reminders' },
       { label: 'Studio news', value: 'studio-news' },
     ])
@@ -241,6 +242,7 @@ describe('Notifications (payload-notifications)', () => {
     expect(listed.status).toBe(200)
     expect(listed.body.channels).toEqual([
       expect.objectContaining({ id: 'bookings', subscribed: true }),
+      expect.objectContaining({ id: 'orders', subscribed: true }),
       expect.objectContaining({ id: 'class-reminders', subscribed: true }),
       expect.objectContaining({ id: 'studio-news', subscribed: false }),
     ])
