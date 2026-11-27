@@ -31,6 +31,7 @@
     "@payloadcms/ui": "3.94.2",
     "@xtr-dev/payload-automation": "^0.5.0",
     "@xtr-dev/payload-billing": "^0.6.0",
+    "@xtr-dev/payload-ecommerce": "^0.1.0",
     "@xtr-dev/payload-feature-flags": "^0.3.0",
     "@xtr-dev/payload-mailing": "^0.9.0",
     "@xtr-dev/payload-notifications": "^0.3.0",

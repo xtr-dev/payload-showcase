@@ -1,23 +1,31 @@
 import { ButtonLink } from '@/components/ui'
 import { getCurrentUser } from '@/lib/auth'
-import { isEnabled } from '@/lib/flags'
+import { getVisitorId, isEnabled } from '@/lib/flags'
 import { getPayloadClient } from '@/lib/payload'
+import { getCartCount, toCartSession } from '@/lib/shop'
 
 import { Logo } from './Logo'
 import { NavLink } from './NavLink'
 import { NotificationBell } from './NotificationBell'
 
 export const SiteHeader = async () => {
-  const [payload, user, giftCards] = await Promise.all([
+  const [payload, user, giftCards, shop, visitorId] = await Promise.all([
     getPayloadClient(),
     getCurrentUser(),
     isEnabled('gift-cards'),
+    isEnabled('shop'),
+    getVisitorId(),
   ])
   const settings = await payload.findGlobal({ slug: 'site-settings', depth: 0 })
+  // The cart belongs to the browser (the visitor cookie), signed in or not.
+  const cartSession = shop ? toCartSession(visitorId) : null
+  const cartCount = cartSession ? await getCartCount(payload, cartSession) : 0
+  const cartLink = cartCount > 0 ? { href: '/shop/cart', label: `Cart (${cartCount})` } : null
 
   const links = [
     { href: '/workshops', label: 'Workshops' },
     { href: '/membership', label: 'Membership' },
+    ...(shop ? [{ href: '/shop', label: 'Shop' }] : []),
     ...(giftCards ? [{ href: '/gift-cards', label: 'Gift cards' }] : []),
     { href: '/showcase', label: 'Showcase' },
   ]
@@ -42,6 +50,11 @@ export const SiteHeader = async () => {
           </nav>
 
           <div className="hidden items-center gap-3 md:flex">
+            {cartLink && (
+              <span data-testid="cart-link">
+                <NavLink href={cartLink.href}>{cartLink.label}</NavLink>
+              </span>
+            )}
             {user ? (
               <>
                 <NotificationBell user={user} />
@@ -72,6 +85,7 @@ export const SiteHeader = async () => {
               <ul className="flex flex-col">
                 {[
                   ...links,
+                  ...(cartLink ? [cartLink] : []),
                   user
                     ? { href: '/account', label: 'My studio' }
                     : { href: '/login', label: 'Sign in' },

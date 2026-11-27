@@ -18,12 +18,14 @@ export type FlagName =
   | 'gift-cards'
   /** Rolls out BookingFlowV2 on the /book/[sessionId] page. */
   | 'new-booking-flow'
+  /** Gates the studio shop (/shop and everything under it) and its navigation link. */
+  | 'shop'
 
 export type ExperimentName = 'home-hero'
 
 export type Variant = 'a' | 'b'
 
-export const FLAG_NAMES: FlagName[] = ['gift-cards', 'new-booking-flow']
+export const FLAG_NAMES: FlagName[] = ['gift-cards', 'new-booking-flow', 'shop']
 export const EXPERIMENT_NAMES: ExperimentName[] = ['home-hero']
 export const VARIANTS: Variant[] = ['a', 'b']
 

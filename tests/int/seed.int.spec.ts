@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { seed } from '@/seed'
 import { MEMBERSHIP_PLANS, SEED_USERS, WORKSHOPS } from '@/seed/data'
+import { PRODUCT_SEEDS } from '@/seed/ecommerce'
 
 import { getTestPayload, type TestPayload } from '../helpers/payload'
 
@@ -42,7 +43,8 @@ describe('seed', () => {
       workshops: WORKSHOPS.length + 1, // plus one draft
       sessions: sessionCount,
       bookings: 3,
-      media: WORKSHOPS.length + 2, // one per workshop, plus hero and about art
+      // One per workshop and per shop product, plus hero and about art.
+      media: WORKSHOPS.length + PRODUCT_SEEDS.length + 2,
       plans: MEMBERSHIP_PLANS.length,
     })
     expect(ctx.workshops.every((w) => w._status === 'published')).toBe(true)
