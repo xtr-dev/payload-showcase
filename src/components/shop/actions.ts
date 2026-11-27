@@ -1,11 +1,23 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
+import { getCurrentUser } from '@/lib/auth'
 import { getVisitorId, isEnabled } from '@/lib/flags'
 import { getPayloadClient } from '@/lib/payload'
-import { addToCart, setCartLineQuantity, ShopError, toCartSession } from '@/lib/shop'
+import {
+  addToCart,
+  CheckoutError,
+  getOrderForVisitor,
+  placeOrder,
+  restoreCartFromOrder,
+  setCartLineQuantity,
+  ShopError,
+  toCartSession,
+  type CheckoutField,
+  type CheckoutValues,
+} from '@/lib/shop'
 
 export interface CartFormState {
   error?: string
@@ -69,6 +81,78 @@ export async function updateCartLineAction(
   }
   refresh()
   return {}
+}
+
+export interface CheckoutFormState {
+  error?: string
+  /** Messages per input, when the form was filled in wrongly. */
+  fieldErrors?: CheckoutValues
+  /** What the customer typed, so the form can be shown again without losing it. */
+  values?: CheckoutValues
+}
+
+const CHECKOUT_FIELDS: CheckoutField[] = [
+  'email',
+  'firstName',
+  'lastName',
+  'address1',
+  'address2',
+  'postalCode',
+  'city',
+  'country',
+]
+
+/**
+ * Places the order for the visitor's cart and sends them to the payment page. The form supplies
+ * an address, an email for guests and a coupon code; the cart, the prices and the totals are
+ * taken from the server (see `placeOrder`). Works signed in or as a guest.
+ */
+export async function placeOrderAction(
+  _prev: CheckoutFormState,
+  formData: FormData,
+): Promise<CheckoutFormState> {
+  const values: CheckoutValues = {}
+  for (const field of CHECKOUT_FIELDS) {
+    const value = formData.get(field)
+    if (typeof value === 'string') values[field] = value.slice(0, 300)
+  }
+  let redirectTo: string
+  try {
+    const sessionId = await cartSession()
+    const user = await getCurrentUser()
+    ;({ redirectTo } = await placeOrder(await getPayloadClient(), sessionId, user, {
+      ...values,
+      couponCode: formData.get('couponCode'),
+    }))
+  } catch (error) {
+    if (error instanceof CheckoutError) {
+      return { error: error.message, fieldErrors: error.fields, values }
+    }
+    if (!(error instanceof ShopError)) throwIfNextControlFlow(error)
+    return { error: message(error), values }
+  }
+  refresh()
+  redirect(redirectTo)
+}
+
+/**
+ * Puts a cancelled order's items back in the visitor's cart (after a payment that did not go
+ * through) and opens the cart. The order is named by its number plus its token, or belongs to the
+ * signed-in member; see `getOrderForVisitor`.
+ */
+export async function restoreCartAction(formData: FormData): Promise<void> {
+  const sessionId = await cartSession()
+  const payload = await getPayloadClient()
+  const order = await getOrderForVisitor(payload, formData.get('orderNumber'), {
+    token: formData.get('token'),
+    user: await getCurrentUser(),
+  })
+  if (!order) notFound()
+  await restoreCartFromOrder(payload, sessionId, order).catch((error) => {
+    if (!(error instanceof ShopError)) throw error
+  })
+  refresh()
+  redirect('/shop/cart')
 }
 
 /** Lets Next.js see its own notFound/redirect errors, which carry a `digest`. */

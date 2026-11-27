@@ -23,6 +23,7 @@ import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { RefundBookingButton as RefundBookingButton_2c250197aaef497d637a5f2834208d3d } from '@/components/billing/RefundBookingButton'
 import { TemplatePreview as TemplatePreview_8442af03cc3fb2889e04ee32939a8fc6 } from '@xtr-dev/payload-mailing/client'
+import { RefundOrderButton as RefundOrderButton_ebd03a2bf69e0365abae7f8fc88a2acb } from '@/components/shop/RefundOrderButton'
 import { ReadOnlyBanner as ReadOnlyBanner_6f365a93b6cb4b34ad564b391e21db6f } from '@xtr-dev/payload-automation/client'
 import { StatusCell as StatusCell_6f365a93b6cb4b34ad564b391e21db6f } from '@xtr-dev/payload-automation/client'
 import { ErrorDisplay as ErrorDisplay_6f365a93b6cb4b34ad564b391e21db6f } from '@xtr-dev/payload-automation/client'
@@ -56,6 +57,7 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@/components/billing/RefundBookingButton#RefundBookingButton": RefundBookingButton_2c250197aaef497d637a5f2834208d3d,
   "@xtr-dev/payload-mailing/client#TemplatePreview": TemplatePreview_8442af03cc3fb2889e04ee32939a8fc6,
+  "@/components/shop/RefundOrderButton#RefundOrderButton": RefundOrderButton_ebd03a2bf69e0365abae7f8fc88a2acb,
   "@xtr-dev/payload-automation/client#ReadOnlyBanner": ReadOnlyBanner_6f365a93b6cb4b34ad564b391e21db6f,
   "@xtr-dev/payload-automation/client#StatusCell": StatusCell_6f365a93b6cb4b34ad564b391e21db6f,
   "@xtr-dev/payload-automation/client#ErrorDisplay": ErrorDisplay_6f365a93b6cb4b34ad564b391e21db6f,

@@ -1,10 +1,11 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
-import { USERS } from '../helpers/e2e'
+import { registerMember, USERS } from '../helpers/e2e'
 
 /**
- * End-to-end tests for the @xtr-dev/payload-ecommerce integration: the shop's catalogue and cart.
- * Every test uses a fresh browser context, and so its own visitor cookie and its own cart.
+ * End-to-end tests for the @xtr-dev/payload-ecommerce integration: the shop's catalogue, cart and
+ * checkout, paid through payload-billing's test provider. Every test uses a fresh browser context,
+ * and so its own visitor cookie and its own cart.
  */
 
 const setShopFlag = async (request: APIRequestContext, enabled: boolean) => {
@@ -24,6 +25,36 @@ const addToCart = async (
   if (quantity) await form.getByLabel('Quantity').selectOption(String(quantity))
   await form.getByRole('button', { name: /^Add to cart/ }).click()
   await expect(form.getByText('Added to your cart')).toBeVisible()
+}
+
+/** Fills in the delivery form on /shop/checkout. Guests also give an email. */
+const fillDelivery = async (page: Page, email?: string) => {
+  const form = page.getByTestId('checkout-form')
+  if (email) await form.getByLabel('Email').fill(email)
+  await form.getByLabel('First name').fill('Guus')
+  await form.getByLabel('Last name').fill('Gast')
+  await form.getByLabel('Street and house number').fill('Strandweg 12')
+  await form.getByLabel('Postcode').fill('2042 AA')
+  await form.getByLabel('Town or city').fill('Zandvoort')
+}
+
+/** Picks a method and scenario on the test provider's checkout page and submits it. */
+const payOnTestProvider = async (page: Page, scenario: string) => {
+  await page.waitForURL(/\/api\/payload-billing\/test\/payment\/test_pay_/)
+  await expect(page.getByText('Test Payment Checkout')).toBeVisible()
+  await page.locator('.method[data-method="ideal"]').click()
+  await page.locator(`.scenario[data-scenario="${scenario}"]`).click()
+  await page.getByRole('button', { name: 'Process Test Payment' }).click()
+  // The provider sends the customer back to the order page, with the order's token.
+  await page.waitForURL(/\/shop\/orders\/ORD-[\d-]+\?t=[0-9a-f]{40}$/, { timeout: 20_000 })
+}
+
+const signInAsAdmin = async (page: Page) => {
+  await page.goto('/admin/login')
+  await page.getByLabel('Email').fill(USERS.admin.email)
+  await page.getByLabel('Password').fill(USERS.admin.password)
+  await page.getByRole('button', { name: 'Login' }).click()
+  await page.waitForURL(/\/admin$/)
 }
 
 test.describe('Shop (payload-ecommerce)', () => {
@@ -121,6 +152,154 @@ test.describe('Shop (payload-ecommerce)', () => {
     await other.context().close()
   })
 
+  test('a guest checks out with a discount code, pays and sees the confirmation', async ({
+    page,
+    browser,
+  }) => {
+    await page.goto('/shop/speckled-mug')
+    await addToCart(page, { glaze: 'Celadon', quantity: 2 })
+    await page.goto('/shop/cart')
+    await page.getByLabel('Discount code').fill('WELCOME10')
+    await page.getByRole('button', { name: 'Apply' }).click()
+    await expect(page.getByTestId('coupon-applied')).toBeVisible()
+    await page.getByRole('link', { name: 'Checkout' }).click()
+    await page.waitForURL('**/shop/checkout?code=WELCOME10')
+
+    await expect(page.getByTestId('checkout-lines')).toContainText('2 × Speckled mug · Celadon')
+    const summary = page.getByTestId('order-summary')
+    await expect(summary).toContainText('WELCOME10')
+    await expect(summary).toContainText('€57.35')
+    await expect(page.getByText('Checking out as a guest.')).toBeVisible()
+
+    // The server checks the form: an empty one comes back with a message per field.
+    await page.getByRole('button', { name: 'Pay €57.35' }).click()
+    await expect(page.getByText('Enter your first name.')).toBeVisible()
+    await expect(page.getByText('Enter an email address')).toBeVisible()
+
+    const email = `guest-${Date.now()}@kiln.test`
+    await fillDelivery(page, email)
+    await page.getByRole('button', { name: 'Pay €57.35' }).click()
+    await page.waitForURL(/\/api\/payload-billing\/test\/payment\/test_pay_/)
+    await expect(page.locator('.amount')).toHaveText('EUR 57.35')
+    await payOnTestProvider(page, 'instant-success')
+
+    await expect(page.getByTestId('order-heading')).toHaveText('Thank you, your order is in!')
+    const result = page.getByTestId('order-result')
+    await expect(result).toContainText('Paid')
+    await expect(result).toContainText('2 × Speckled mug (Celadon)')
+    await expect(result).toContainText('−€5.60')
+    await expect(result).toContainText('€57.35')
+    await expect(result).toContainText('Guus Gast')
+    await expect(result).toContainText(email)
+    await expect(page.getByTestId('cart-link')).toHaveCount(0)
+
+    // Without its token the order does not exist for anyone else, and not through the API.
+    const url = new URL(page.url())
+    const stranger = await (await browser.newContext()).newPage()
+    expect((await stranger.goto(url.pathname))?.status()).toBe(404)
+    expect((await stranger.goto(`${url.pathname}?t=${'0'.repeat(40)}`))?.status()).toBe(404)
+    expect((await stranger.goto(url.pathname + url.search))?.status()).toBe(200)
+    const api = await stranger.request.get('/api/orders')
+    expect(api.status()).toBe(403)
+    await stranger.context().close()
+  })
+
+  test('a member’s order shows up in their account, with its invoice', async ({ page }) => {
+    await registerMember(page, 'Noor Winkel')
+    await page.goto('/shop/breakfast-bowl')
+    await addToCart(page, { quantity: 3 })
+    await page.goto('/shop/cart')
+    // 3 × €34 = €102: free shipping.
+    await page.getByRole('link', { name: 'Checkout' }).click()
+    await expect(page.getByText(/Signed in as e2e-/)).toBeVisible()
+    const form = page.getByTestId('checkout-form')
+    await expect(form.getByLabel('Email')).toHaveCount(0)
+    await expect(form.getByLabel('First name')).toHaveValue('Noor')
+    await fillDelivery(page)
+    await page.getByRole('button', { name: 'Pay €102' }).click()
+    await payOnTestProvider(page, 'instant-success')
+    await expect(page.getByTestId('order-heading')).toHaveText('Thank you, your order is in!')
+    const number = (await page.getByTestId('order-number').textContent())!.trim()
+
+    await page.getByRole('link', { name: 'View invoice' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^INV-\d+$/)
+    await expect(page.getByRole('article')).toContainText('Breakfast bowl')
+    await expect(page.getByRole('article')).toContainText('Noor Winkel')
+
+    await page.goto('/account')
+    const orders = page.getByTestId('orders')
+    await expect(orders.getByRole('listitem')).toHaveCount(1)
+    await expect(orders).toContainText('3 × Breakfast bowl')
+    await expect(orders).toContainText(number)
+    await expect(orders).toContainText('Paid')
+    await expect(page.getByTestId('payments')).toContainText(`Shop order ${number}`)
+
+    // The member reaches their order without the token.
+    await orders.getByRole('link').click()
+    await page.waitForURL(`**/shop/orders/${number}`)
+    await expect(page.getByTestId('order-result')).toContainText('Paid')
+  })
+
+  test('a declined payment cancels the order and the items can go back in the cart', async ({
+    page,
+  }) => {
+    await page.goto('/shop/trimming-tool-set')
+    await addToCart(page, {})
+    await page.goto('/shop/checkout')
+    await fillDelivery(page, 'declined@kiln.test')
+    await page.getByRole('button', { name: /^Pay / }).click()
+    await payOnTestProvider(page, 'declined-payment')
+
+    await expect(page.getByTestId('order-heading')).toHaveText('Your payment didn’t go through')
+    await expect(page.getByTestId('order-result')).toContainText('Cancelled')
+    await expect(page.getByTestId('order-result')).toContainText('Nothing was charged')
+    await page.getByRole('button', { name: 'Put it back in my cart' }).click()
+    await page.waitForURL('**/shop/cart')
+    await expect(page.getByTestId('cart-lines')).toContainText('Trimming tool set')
+  })
+
+  test('an admin refunds an order from its edit view, which restocks it', async ({
+    page,
+    browser,
+  }) => {
+    await page.goto('/shop/stoneware-clay-5-kg')
+    await addToCart(page, { quantity: 2 })
+    await page.goto('/shop/checkout')
+    await fillDelivery(page, 'refund@kiln.test')
+    await page.getByRole('button', { name: /^Pay / }).click()
+    await payOnTestProvider(page, 'instant-success')
+    await expect(page.getByTestId('order-result')).toContainText('Paid')
+    const number = (await page.getByTestId('order-number').textContent())!.trim()
+
+    const admin = await (await browser.newContext()).newPage()
+    await signInAsAdmin(admin)
+    const found = await admin.request.get(
+      `/api/orders?where[orderNumber][equals]=${number}&depth=0`,
+    )
+    const { docs } = (await found.json()) as {
+      docs: Array<{ id: number; status: string; items: Array<{ product: number }> }>
+    }
+    expect(docs[0].status).toBe('processing')
+    const stock = async () =>
+      (
+        (await (await admin.request.get(`/api/products/${docs[0].items[0].product}`)).json()) as {
+          inventory: { quantity: number }
+        }
+      ).inventory.quantity
+    const held = await stock()
+
+    await admin.goto(`/admin/collections/orders/${docs[0].id}`)
+    admin.once('dialog', (dialog) => dialog.accept())
+    await admin.getByRole('button', { name: 'Refund order' }).click()
+    await expect(admin.getByText('Order is now refunded')).toBeVisible()
+    expect(await stock()).toBe(held + 2)
+    await admin.context().close()
+
+    await page.reload()
+    await expect(page.getByTestId('order-heading')).toHaveText('This order was refunded')
+    await expect(page.getByTestId('order-result')).toContainText('Refunded')
+  })
+
   test('the shop disappears while its flag is off', async ({ page, playwright, baseURL }) => {
     const api = await playwright.request.newContext({ baseURL })
     expect((await api.post('/api/users/login', { data: USERS.admin })).ok()).toBe(true)
@@ -129,7 +308,7 @@ test.describe('Shop (payload-ecommerce)', () => {
       await setShopFlag(api, false)
       await page.goto('/')
       await expect(nav.getByRole('link', { name: 'Shop', exact: true })).toHaveCount(0)
-      for (const path of ['/shop', '/shop/speckled-mug', '/shop/cart']) {
+      for (const path of ['/shop', '/shop/speckled-mug', '/shop/cart', '/shop/checkout']) {
         expect((await page.goto(path))?.status(), path).toBe(404)
       }
     } finally {

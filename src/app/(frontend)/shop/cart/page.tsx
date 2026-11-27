@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
-import { PluginPlaceholder } from '@/components/PluginPlaceholder'
 import { CartLineForm } from '@/components/shop/CartLineForm'
 import { OrderSummary } from '@/components/shop/OrderSummary'
 import { Alert, Button, ButtonLink, Card, Container, MediaImage, TextField } from '@/components/ui'
@@ -166,9 +165,19 @@ export default async function CartPage({ searchParams }: { searchParams: SearchP
               <Alert tone="warning">Change or remove the marked items to check out.</Alert>
             )}
           </Card>
-          <PluginPlaceholder plugin="@xtr-dev/payload-ecommerce">
-            Checkout is being wired in: paying for a cart goes through payload-billing next.
-          </PluginPlaceholder>
+          {cart.blocked ? (
+            <Button size="lg" className="w-full" disabled>
+              Checkout
+            </Button>
+          ) : (
+            <ButtonLink
+              href={`/shop/checkout${quote.coupon ? `?code=${quote.coupon.code}` : ''}`}
+              size="lg"
+              className="w-full"
+            >
+              Checkout
+            </ButtonLink>
+          )}
           <p className="text-sm">
             <Link href="/shop" className="font-medium text-clay hover:underline">
               Keep browsing

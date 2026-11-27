@@ -451,6 +451,10 @@ export interface Payment {
    * The membership this payment is for.
    */
   membershipPlan?: (number | null) | MembershipPlan;
+  /**
+   * The shop order this payment is for.
+   */
+  order?: (number | null) | Order;
   updatedAt: string;
   createdAt: string;
 }
@@ -469,7 +473,7 @@ export interface Invoice {
    */
   customer?: (number | null) | User;
   /**
-   * Customer billing information (auto-populated from customer relationship)
+   * Customer billing information
    */
   customerInfo?: {
     /**
@@ -494,7 +498,7 @@ export interface Invoice {
     taxId?: string | null;
   };
   /**
-   * Billing address (auto-populated from customer relationship)
+   * Billing address
    */
   billingAddress?: {
     /**
@@ -635,6 +639,234 @@ export interface Refund {
     | number
     | boolean
     | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "orders".
+ */
+export interface Order {
+  id: number;
+  orderNumber?: string | null;
+  /**
+   * User who placed the order (optional for guest orders)
+   */
+  user?: (number | null) | User;
+  /**
+   * Where to reach the customer about this order. Needed for a guest order, which has no user.
+   */
+  customerEmail?: string | null;
+  items: {
+    product: number | Product;
+    variant?: string | null;
+    quantity: number;
+    /**
+     * Price at time of purchase
+     */
+    price: number;
+    total: number;
+    id?: string | null;
+  }[];
+  subtotal: number;
+  tax?: number | null;
+  shipping?: number | null;
+  discount?: number | null;
+  /**
+   * Calculated on save: subtotal − discount + tax + shipping
+   */
+  total: number;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
+  paymentMethod?: string | null;
+  /**
+   * Payment gateway transaction ID
+   */
+  paymentId?: string | null;
+  shippingAddress: {
+    firstName: string;
+    lastName: string;
+    address1: string;
+    address2?: string | null;
+    city: string;
+    state?: string | null;
+    postalCode?: string | null;
+    country: string;
+    phone?: string | null;
+  };
+  /**
+   * Optional. createOrderFromCart copies the shipping address when none is given.
+   */
+  billingAddress?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+    phone?: string | null;
+  };
+  notes?: string | null;
+  /**
+   * On a new order the coupon is validated and sets the discount (or zeroes shipping for a free shipping coupon). Changing it later does not recalculate the order.
+   */
+  coupon?: (number | null) | Coupon;
+  /**
+   * Set by the plugin while this order holds stock. Cleared when the stock is put back on cancellation or refund.
+   */
+  inventoryReduced?: boolean | null;
+  /**
+   * Set by the plugin while this order counts as a use of its coupon. Cleared on cancellation or refund.
+   */
+  couponUsageCounted?: boolean | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "products".
+ */
+export interface Product {
+  id: number;
+  title: string;
+  /**
+   * One or two sentences for the product card.
+   */
+  summary?: string | null;
+  /**
+   * Leave empty to generate it from the title. Must be unique.
+   */
+  slug?: string | null;
+  description?: {
+    root: {
+      type: string;
+      children: {
+        type: any;
+        version: number;
+        [k: string]: unknown;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  } | null;
+  price: number;
+  /**
+   * Original price for showing discounts
+   */
+  compareAtPrice?: number | null;
+  /**
+   * Stock keeping unit
+   */
+  sku?: string | null;
+  barcode?: string | null;
+  inventory?: {
+    trackQuantity?: boolean | null;
+    quantity?: number | null;
+    /**
+     * Alert threshold for low stock
+     */
+    lowStockThreshold?: number | null;
+  };
+  images?: (number | Media)[] | null;
+  categories?: (number | Category)[] | null;
+  variants?:
+    | {
+        name: string;
+        sku?: string | null;
+        /**
+         * Price override for this variant
+         */
+        price?: number | null;
+        inventory?: number | null;
+        id?: string | null;
+      }[]
+    | null;
+  status: 'draft' | 'active' | 'archived';
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "categories".
+ */
+export interface Category {
+  id: number;
+  name: string;
+  /**
+   * Leave empty to generate it from the name. Must be unique.
+   */
+  slug?: string | null;
+  description?: string | null;
+  /**
+   * Parent category for nesting
+   */
+  parent?: (number | null) | Category;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "coupons".
+ */
+export interface Coupon {
+  id: number;
+  /**
+   * Stored in upper case; customers can enter it in any case
+   */
+  code: string;
+  /**
+   * Internal description
+   */
+  description?: string | null;
+  type: 'percentage' | 'fixed' | 'freeShipping';
+  /**
+   * Discount value (percentage or fixed amount). Not used for free shipping.
+   */
+  value?: number | null;
+  /**
+   * Minimum order amount required
+   */
+  minPurchase?: number | null;
+  /**
+   * Maximum discount cap
+   */
+  maxDiscount?: number | null;
+  /**
+   * Total usage limit (0 = unlimited)
+   */
+  usageLimit?: number | null;
+  /**
+   * Orders that currently use this coupon. Counted when an order is created and given back when it is cancelled or refunded.
+   */
+  usageCount?: number | null;
+  /**
+   * Per-customer usage limit (0 = unlimited)
+   */
+  customerLimit?: number | null;
+  /**
+   * Start date
+   */
+  validFrom?: string | null;
+  /**
+   * End date
+   */
+  validUntil?: string | null;
+  status: 'active' | 'inactive' | 'expired';
+  /**
+   * Specific products this coupon applies to (empty = all products)
+   */
+  appliesToProducts?: (number | Product)[] | null;
+  /**
+   * Specific categories this coupon applies to (empty = all categories)
+   */
+  appliesToCategories?: (number | Category)[] | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1679,234 +1911,6 @@ export interface ExperimentEvent {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "products".
- */
-export interface Product {
-  id: number;
-  title: string;
-  /**
-   * One or two sentences for the product card.
-   */
-  summary?: string | null;
-  /**
-   * Leave empty to generate it from the title. Must be unique.
-   */
-  slug?: string | null;
-  description?: {
-    root: {
-      type: string;
-      children: {
-        type: any;
-        version: number;
-        [k: string]: unknown;
-      }[];
-      direction: ('ltr' | 'rtl') | null;
-      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
-      indent: number;
-      version: number;
-    };
-    [k: string]: unknown;
-  } | null;
-  price: number;
-  /**
-   * Original price for showing discounts
-   */
-  compareAtPrice?: number | null;
-  /**
-   * Stock keeping unit
-   */
-  sku?: string | null;
-  barcode?: string | null;
-  inventory?: {
-    trackQuantity?: boolean | null;
-    quantity?: number | null;
-    /**
-     * Alert threshold for low stock
-     */
-    lowStockThreshold?: number | null;
-  };
-  images?: (number | Media)[] | null;
-  categories?: (number | Category)[] | null;
-  variants?:
-    | {
-        name: string;
-        sku?: string | null;
-        /**
-         * Price override for this variant
-         */
-        price?: number | null;
-        inventory?: number | null;
-        id?: string | null;
-      }[]
-    | null;
-  status: 'draft' | 'active' | 'archived';
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "categories".
- */
-export interface Category {
-  id: number;
-  name: string;
-  /**
-   * Leave empty to generate it from the name. Must be unique.
-   */
-  slug?: string | null;
-  description?: string | null;
-  /**
-   * Parent category for nesting
-   */
-  parent?: (number | null) | Category;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "orders".
- */
-export interface Order {
-  id: number;
-  orderNumber?: string | null;
-  /**
-   * User who placed the order (optional for guest orders)
-   */
-  user?: (number | null) | User;
-  /**
-   * Where to reach the customer about this order. Needed for a guest order, which has no user.
-   */
-  customerEmail?: string | null;
-  items: {
-    product: number | Product;
-    variant?: string | null;
-    quantity: number;
-    /**
-     * Price at time of purchase
-     */
-    price: number;
-    total: number;
-    id?: string | null;
-  }[];
-  subtotal: number;
-  tax?: number | null;
-  shipping?: number | null;
-  discount?: number | null;
-  /**
-   * Calculated on save: subtotal − discount + tax + shipping
-   */
-  total: number;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
-  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
-  paymentMethod?: string | null;
-  /**
-   * Payment gateway transaction ID
-   */
-  paymentId?: string | null;
-  shippingAddress: {
-    firstName: string;
-    lastName: string;
-    address1: string;
-    address2?: string | null;
-    city: string;
-    state?: string | null;
-    postalCode?: string | null;
-    country: string;
-    phone?: string | null;
-  };
-  /**
-   * Optional. createOrderFromCart copies the shipping address when none is given.
-   */
-  billingAddress?: {
-    firstName?: string | null;
-    lastName?: string | null;
-    address1?: string | null;
-    address2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    phone?: string | null;
-  };
-  notes?: string | null;
-  /**
-   * On a new order the coupon is validated and sets the discount (or zeroes shipping for a free shipping coupon). Changing it later does not recalculate the order.
-   */
-  coupon?: (number | null) | Coupon;
-  /**
-   * Set by the plugin while this order holds stock. Cleared when the stock is put back on cancellation or refund.
-   */
-  inventoryReduced?: boolean | null;
-  /**
-   * Set by the plugin while this order counts as a use of its coupon. Cleared on cancellation or refund.
-   */
-  couponUsageCounted?: boolean | null;
-  trackingNumber?: string | null;
-  trackingUrl?: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "coupons".
- */
-export interface Coupon {
-  id: number;
-  /**
-   * Stored in upper case; customers can enter it in any case
-   */
-  code: string;
-  /**
-   * Internal description
-   */
-  description?: string | null;
-  type: 'percentage' | 'fixed' | 'freeShipping';
-  /**
-   * Discount value (percentage or fixed amount). Not used for free shipping.
-   */
-  value?: number | null;
-  /**
-   * Minimum order amount required
-   */
-  minPurchase?: number | null;
-  /**
-   * Maximum discount cap
-   */
-  maxDiscount?: number | null;
-  /**
-   * Total usage limit (0 = unlimited)
-   */
-  usageLimit?: number | null;
-  /**
-   * Orders that currently use this coupon. Counted when an order is created and given back when it is cancelled or refunded.
-   */
-  usageCount?: number | null;
-  /**
-   * Per-customer usage limit (0 = unlimited)
-   */
-  customerLimit?: number | null;
-  /**
-   * Start date
-   */
-  validFrom?: string | null;
-  /**
-   * End date
-   */
-  validUntil?: string | null;
-  status: 'active' | 'inactive' | 'expired';
-  /**
-   * Specific products this coupon applies to (empty = all products)
-   */
-  appliesToProducts?: (number | Product)[] | null;
-  /**
-   * Specific categories this coupon applies to (empty = all categories)
-   */
-  appliesToCategories?: (number | Category)[] | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "carts".
  */
 export interface Cart {
@@ -2278,6 +2282,7 @@ export interface PaymentsSelect<T extends boolean = true> {
   member?: T;
   booking?: T;
   membershipPlan?: T;
+  order?: T;
   updatedAt?: T;
   createdAt?: T;
 }
