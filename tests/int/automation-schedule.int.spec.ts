@@ -111,13 +111,25 @@ describe('firing', () => {
   })
 
   it('fires at 07:00, logs the day ahead and emails the admins', async () => {
-    // A class three hours after the report, so the report has something to list.
-    await payload.create({
-      collection: 'sessions',
+    // Two classes, three and five hours after the report, so the report has a list to show.
+    for (const hours of [3, 5]) {
+      await payload.create({
+        collection: 'sessions',
+        data: {
+          workshop: ctx.workshops[0]!.id,
+          startsAt: new Date(occurrence.getTime() + hours * 60 * MINUTE).toISOString(),
+          status: 'scheduled',
+        },
+      })
+    }
+    // A second admin: the report goes to every admin, not only the first one found.
+    const secondAdmin = await payload.create({
+      collection: 'users',
       data: {
-        workshop: ctx.workshops[0]!.id,
-        startsAt: new Date(occurrence.getTime() + 3 * 60 * MINUTE).toISOString(),
-        status: 'scheduled',
+        name: 'Ines',
+        email: 'ines-admin@kiln.test',
+        password: 'password123',
+        role: 'admin',
       },
     })
     const dayEnd = new Date(occurrence.getTime() + 24 * 60 * MINUTE).toISOString()
@@ -153,7 +165,10 @@ describe('firing', () => {
     expect(docs).toHaveLength(1)
     const [entry] = docs
     expect(entry.title).toMatch(/^Morning report: \w+ \d+ \w+$/)
-    expect(classes.totalDocs).toBeGreaterThan(0)
+    expect(classes.totalDocs).toBeGreaterThanOrEqual(2)
+    // Every class of the day is listed with its start time (the step's `output.docs`).
+    const listed = (entry.message ?? '').match(/\w{3} \d+ \w{3}, \d{2}:\d{2}/g) ?? []
+    expect(listed).toHaveLength(classes.totalDocs)
     expect(entry.message).toMatch(
       new RegExp(
         `^${classes.totalDocs} class(es)? in the next 24 hours \\(.+\\); ` +
@@ -161,9 +176,9 @@ describe('firing', () => {
       ),
     )
 
-    expect(sendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: ctx.admin.email, subject: entry.title }),
-    )
+    const recipients = String(sendEmail.mock.calls.at(-1)?.[0].to).split(', ')
+    expect(recipients.sort()).toEqual([ctx.admin.email, secondAdmin.email].sort())
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ subject: entry.title }))
   })
 
   it('fires each occurrence once', async () => {

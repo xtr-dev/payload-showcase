@@ -82,6 +82,7 @@ export interface Config {
     notifications: Notification;
     'push-subscriptions': PushSubscription;
     'notification-reads': NotificationRead;
+    'channel-subscriptions': ChannelSubscription;
     'feature-flags': FeatureFlag;
     'experiment-events': ExperimentEvent;
     'studio-log': StudioLog;
@@ -112,6 +113,7 @@ export interface Config {
     notifications: NotificationsSelect<false> | NotificationsSelect<true>;
     'push-subscriptions': PushSubscriptionsSelect<false> | PushSubscriptionsSelect<true>;
     'notification-reads': NotificationReadsSelect<false> | NotificationReadsSelect<true>;
+    'channel-subscriptions': ChannelSubscriptionsSelect<false> | ChannelSubscriptionsSelect<true>;
     'feature-flags': FeatureFlagsSelect<false> | FeatureFlagsSelect<true>;
     'experiment-events': ExperimentEventsSelect<false> | ExperimentEventsSelect<true>;
     'studio-log': StudioLogSelect<false> | StudioLogSelect<true>;
@@ -197,10 +199,6 @@ export interface User {
    * Receives the monthly studio newsletter.
    */
   newsletter?: boolean | null;
-  /**
-   * Broadcast channels this member follows. Bookings are always delivered.
-   */
-  notificationChannels?: ('class-reminders' | 'studio-news')[] | null;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -1062,19 +1060,19 @@ export interface Workflow {
       }[]
     | null;
   /**
-   * How to handle step failures
+   * What happens when a step fails. "Stop": the run fails at the first failed step. "Continue": the remaining steps still run, except those that depend on the failed step, and the run ends as completed. "Retry": every step is retried with the settings below, and the run fails when a step still fails after its last retry. A step with its own "Retry this step if it fails" setting is retried with that step's settings under all three options, and only counts as failed after its last retry.
    */
   errorHandling?: ('stop' | 'continue' | 'retry') | null;
   /**
-   * Maximum number of retry attempts
+   * How many times a failed step is retried before the run fails (3 when empty; 3 means up to 4 attempts). Steps with their own retry setting use that instead.
    */
   maxRetries?: number | null;
   /**
-   * Delay between retries in milliseconds
+   * Milliseconds to wait before each retry (1000 when empty). Steps with their own retry setting use that instead.
    */
   retryDelay?: number | null;
   /**
-   * Maximum execution time in milliseconds (0 for no timeout)
+   * Maximum duration of a whole run in milliseconds, including retries and the waits between them (0 or empty for no limit). When it passes, the run fails with "Workflow timed out", whatever the error handling setting: steps still running are recorded as failed, no further step or retry starts. A step that is already running is not interrupted, only its result is discarded.
    */
   timeout?: number | null;
   updatedAt: string;
@@ -1228,15 +1226,15 @@ export interface AutomationStep {
     | boolean
     | null;
   /**
-   * Retry this step if it fails
+   * Retry this step when it fails, in every workflow that uses it. The step only counts as failed, and the workflow's error handling only applies, after the last retry. These settings take precedence over the retry settings of a workflow whose error handling is "Retry".
    */
   retryOnFailure?: boolean | null;
   /**
-   * Maximum number of retry attempts
+   * How many times the step is retried after a failed attempt (3 when empty; 3 means up to 4 attempts). 0 means never, also in a workflow whose error handling is "Retry".
    */
   maxRetries?: number | null;
   /**
-   * Delay between retries in milliseconds
+   * Milliseconds to wait before each retry (1000 when empty)
    */
   retryDelay?: number | null;
   /**
@@ -1358,9 +1356,21 @@ export interface WorkflowRun {
          */
         error?: string | null;
         /**
-         * Number of retry attempts for this step
+         * How many times this step was started in this run. 1 means it ran once without a retry; empty or 0 means it never ran.
+         */
+        attempts?: number | null;
+        /**
+         * Number of retries of this step, i.e. attempts minus one
          */
         retryCount?: number | null;
+        /**
+         * Error of the most recent failed attempt. Also kept when a later attempt succeeded, to show why the step was retried.
+         */
+        lastError?: string | null;
+        /**
+         * Set while the run is paused for a retry of this step (queue mode, long retry delay): when the next attempt is due.
+         */
+        nextRetryAt?: string | null;
         id?: string | null;
       }[]
     | null;
@@ -1546,6 +1556,23 @@ export interface NotificationRead {
   notification: number | Notification;
   user: number | User;
   readAt: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Per-user channel opt-ins and opt-outs. A user without a row for a channel is subscribed to it.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "channel-subscriptions".
+ */
+export interface ChannelSubscription {
+  id: number;
+  user: number | User;
+  channel: 'bookings' | 'class-reminders' | 'studio-news';
+  /**
+   * Unchecked means the user opted out of this channel.
+   */
+  subscribed: boolean;
   updatedAt: string;
   createdAt: string;
 }
@@ -1747,6 +1774,10 @@ export interface PayloadLockedDocument {
         value: number | NotificationRead;
       } | null)
     | ({
+        relationTo: 'channel-subscriptions';
+        value: number | ChannelSubscription;
+      } | null)
+    | ({
         relationTo: 'feature-flags';
         value: number | FeatureFlag;
       } | null)
@@ -1827,7 +1858,6 @@ export interface UsersSelect<T extends boolean = true> {
   membershipStatus?: T;
   membershipRenewsAt?: T;
   newsletter?: T;
-  notificationChannels?: T;
   updatedAt?: T;
   createdAt?: T;
   email?: T;
@@ -2140,6 +2170,17 @@ export interface NotificationReadsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "channel-subscriptions_select".
+ */
+export interface ChannelSubscriptionsSelect<T extends boolean = true> {
+  user?: T;
+  channel?: T;
+  subscribed?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "feature-flags_select".
  */
 export interface FeatureFlagsSelect<T extends boolean = true> {
@@ -2296,7 +2337,10 @@ export interface WorkflowRunsSelect<T extends boolean = true> {
         input?: T;
         output?: T;
         error?: T;
+        attempts?: T;
         retryCount?: T;
+        lastError?: T;
+        nextRetryAt?: T;
         id?: T;
       };
   context?: T;
@@ -2858,7 +2902,7 @@ export interface TaskReadDocument {
   };
   output: {
     /**
-     * The document(s) found
+     * A single document: the one with the given ID, or the first match of the query (null when nothing matched)
      */
     doc?:
       | {
@@ -2870,7 +2914,19 @@ export interface TaskReadDocument {
       | boolean
       | null;
     /**
-     * Total number of documents matching the query
+     * The documents found, as a list: the matches of the query (up to the limit), or the one document with the given ID
+     */
+    docs?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Total number of documents matching the query, which can be more than the limit returned in docs
      */
     totalDocs?: number | null;
   };

@@ -57,6 +57,9 @@ export const RunItem = ({ run, adminLinks = false }: { run: RunSummary; adminLin
               className={`rounded-pill border px-3 py-1 text-xs font-semibold ${s.className}`}
             >
               {step.name} · {s.label}
+              {step.attempts > 1 && (
+                <span className="font-normal"> · {step.attempts} attempts</span>
+              )}
               {step.durationMs !== null && step.status === 'succeeded' && (
                 <span className="font-normal"> · {formatMs(step.durationMs)}</span>
               )}

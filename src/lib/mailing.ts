@@ -300,10 +300,10 @@ export const applyNewsletterChange = async (payload: Payload, user: User): Promi
       processImmediately: true,
     })
   } catch (error) {
-    // The email was created and queued, only running its job inline failed: it goes out on a
-    // later queue run, so the opt-in itself has not failed. (A failed delivery attempt does not
-    // throw at all: the plugin puts the email back to pending and queues a retry after its
-    // retryDelay.)
+    // The plugin throws ImmediateProcessingError when the email was created and queued but not
+    // delivered inline, for example because the mail server is down. The email is not lost: it
+    // is back to pending with a retry job that runs after the plugin's retryDelay, so the opt-in
+    // itself has not failed.
     if (!(error instanceof ImmediateProcessingError)) throw error
     payload.logger.warn(
       { err: error.cause, emailId: error.email.id },

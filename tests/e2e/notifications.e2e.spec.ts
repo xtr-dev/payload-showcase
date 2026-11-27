@@ -55,6 +55,19 @@ test.describe('Notifications (payload-notifications)', () => {
     await expect(inbox(page).getByText('New: glaze mixing demo before class')).toBeVisible()
     await expect(settings.getByLabel(/Bookings/)).toBeDisabled()
 
+    // The choice is stored as the plugin's channel subscription, which its REST endpoint lists
+    // for the signed-in member, and it is still there after a reload.
+    const mine = await page.request.get('/api/channel-subscriptions/me')
+    expect(mine.status()).toBe(200)
+    expect((await mine.json()).channels).toEqual([
+      expect.objectContaining({ id: 'bookings', subscribed: true }),
+      expect.objectContaining({ id: 'class-reminders', subscribed: true }),
+      expect.objectContaining({ id: 'studio-news', subscribed: false }),
+    ])
+    await page.reload()
+    await expect(settings.getByLabel(/Studio news/)).not.toBeChecked()
+    await expect(settings.getByLabel(/Class reminders/)).toBeChecked()
+
     // Without VAPID keys, push is off and says so.
     await expect(page.getByTestId('push-disabled')).toBeVisible()
 

@@ -1,3 +1,8 @@
+import {
+  listChannelSubscriptions,
+  setChannelSubscription,
+  subscribedChannelsWhere,
+} from '@xtr-dev/payload-notifications'
 import type { Payload, PayloadRequest, Where } from 'payload'
 
 import type { Booking, Notification, User } from '@/payload-types'
@@ -15,9 +20,14 @@ import { richText, type RichTextValue } from './richtext'
  * receipts, so `isRead` is always "has this member read it". Members mark notifications read or
  * unread through the plugin's `POST`/`DELETE /api/notifications/:id/read` endpoint (see
  * src/components/notifications/ReadButtons.tsx).
+ *
+ * Which channels a member follows is the plugin's `channel-subscriptions` collection: one row per
+ * member and channel, and a member without a row for a channel follows it. The helpers below read
+ * and write it through the plugin's own functions; the plugin also serves the same choice over
+ * REST (`GET /api/channel-subscriptions/me`, `POST`/`DELETE /api/channel-subscriptions/me/:channel`).
  */
 
-/** Channel ids, shared by the plugin config, the users field and the UI. */
+/** Channel ids, shared by the plugin config and the UI. */
 export type ChannelId = 'bookings' | 'studio-news' | 'class-reminders'
 
 export interface ChannelDefinition {
@@ -49,23 +59,49 @@ export const CHANNELS: ChannelDefinition[] = [
   },
 ]
 
-/** The channels members can switch off, typed like the `users.notificationChannels` field. */
-export const OPTIONAL_CHANNEL_IDS = CHANNELS.filter((c) => c.optional).map(
-  (c) => c.id,
-) as NonNullable<User['notificationChannels']>
+/** The channels members can switch off. */
+export const OPTIONAL_CHANNEL_IDS: ChannelId[] = CHANNELS.filter((c) => c.optional).map((c) => c.id)
+
+/**
+ * Every channel id. A device that turns on web push subscribes to all of them: what a member
+ * receives is decided per member by their channel subscriptions, not per device.
+ */
+export const ALL_CHANNEL_IDS: ChannelId[] = CHANNELS.map((c) => c.id)
 
 export const channelName = (id: string | null | undefined): string =>
   CHANNELS.find((c) => c.id === id)?.name ?? 'General'
 
-/** The broadcast channels a member follows. Unset (older accounts) means all of them. */
-export const followedChannels = (user: Pick<User, 'notificationChannels'>): ChannelId[] =>
-  (user.notificationChannels ?? OPTIONAL_CHANNEL_IDS) as ChannelId[]
+/**
+ * The optional channels a member follows, read from the plugin's channel subscriptions. A member
+ * who never chose follows all of them.
+ */
+export const getFollowedChannels = async (
+  payload: Payload,
+  user: Pick<User, 'id'>,
+): Promise<ChannelId[]> => {
+  const states = await listChannelSubscriptions({ payload, user: user.id })
+  return OPTIONAL_CHANNEL_IDS.filter((id) => states.find((s) => s.id === id)?.subscribed !== false)
+}
 
-/** Channels a member's push subscriptions receive: the always-on ones plus those they follow. */
-export const pushChannelsFor = (user: Pick<User, 'notificationChannels'>): ChannelId[] => [
-  ...CHANNELS.filter((c) => !c.optional).map((c) => c.id),
-  ...followedChannels(user),
-]
+/**
+ * Stores which optional channels a member follows: one channel-subscription row per optional
+ * channel, subscribed or opted out. The always-on channels are never written, so they cannot be
+ * switched off from the site.
+ */
+export const setFollowedChannels = async (
+  payload: Payload,
+  user: Pick<User, 'id'>,
+  followed: readonly string[],
+): Promise<void> => {
+  for (const channel of OPTIONAL_CHANNEL_IDS) {
+    await setChannelSubscription({
+      payload,
+      user: user.id,
+      channel,
+      subscribed: followed.includes(channel),
+    })
+  }
+}
 
 /** VAPID keys for web push, or null when push isn't configured (the default). */
 export const vapidKeys = (): { publicKey: string; privateKey: string } | null => {
@@ -195,23 +231,18 @@ export const broadcast = (
     req,
   })
 
-/** Query for the notifications in a member's inbox: their own plus broadcasts they follow. */
-export const inboxWhere = (user: User): Where => {
-  const channels = followedChannels(user)
+/**
+ * Query for the notifications in a member's inbox: their own plus broadcasts on channels they
+ * did not opt out of. The plugin's `subscribedChannelsWhere` supplies the channel filter (empty
+ * when the member opted out of nothing); it is applied to broadcasts only, so a personal
+ * notification always arrives, whatever its channel.
+ */
+export const inboxWhere = async (payload: Payload, user: Pick<User, 'id'>): Promise<Where> => {
+  const followed = await subscribedChannelsWhere({ payload, user: user.id })
   return {
     or: [
       { recipient: { equals: user.id } },
-      {
-        and: [
-          { audience: { equals: 'broadcast' } },
-          {
-            or: [
-              { channel: { exists: false } },
-              ...(channels.length ? [{ channel: { in: channels } }] : []),
-            ],
-          },
-        ],
-      },
+      { and: [{ audience: { equals: 'broadcast' } }, followed] },
     ],
   }
 }
@@ -236,7 +267,7 @@ export const getInbox = async (
 ): Promise<InboxItem[]> => {
   const { docs } = await payload.find({
     collection: 'notifications',
-    where: inboxWhere(user),
+    where: await inboxWhere(payload, user),
     sort: '-createdAt',
     depth: 0,
     limit,

@@ -320,10 +320,14 @@ describe('newsletter', () => {
   it('keeps an opt-in when its confirmation cannot be sent right away, and queues a retry', async () => {
     // The mailing plugin delivers through the configured email adapter, not payload.sendEmail.
     const send = vi.spyOn(payload.email, 'sendEmail').mockRejectedValue(new Error('SMTP is down'))
+    const warn = vi.spyOn(payload.logger, 'warn')
+    let warnings: unknown[][]
     try {
       await expect(setNewsletterSubscription(payload, mara, true)).resolves.toBeTruthy()
+      warnings = [...warn.mock.calls]
     } finally {
       send.mockRestore()
+      warn.mockRestore()
     }
 
     const [confirmation] = await emailsWhere({
@@ -333,6 +337,11 @@ describe('newsletter', () => {
     })
     expect(confirmation).toBeDefined()
     expect(confirmation.status).toBe('pending')
+    // The immediate send threw ImmediateProcessingError for this email, which the opt-in caught.
+    expect(warnings).toContainEqual([
+      expect.objectContaining({ emailId: confirmation.id }),
+      expect.stringContaining('stays queued for a retry'),
+    ])
     // The plugin queued a retry job for it, which waits for retryDelay.
     const { docs: jobs } = await payload.find({
       collection: 'payload-jobs',

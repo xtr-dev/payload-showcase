@@ -8,17 +8,23 @@ import type { SeedContext } from './types'
 
 /**
  * The studio's code-defined workflows. `src/plugins/automation.ts` hands them to the plugin's
- * `seedWorkflows` option, which creates each one (with its triggers and steps) on boot when no
- * workflow with that slug exists yet, and marks it read-only in the admin panel.
+ * `seedWorkflows` option, which creates each one (with its triggers and steps) on boot, marks it
+ * read-only in the admin panel and, when a definition here changes, updates the stored workflow in
+ * place on the next boot (steps are matched by slug, so run history keeps pointing at them).
  *
- * Expression rules in payload-automation 0.4.0, which these definitions follow:
+ * Expression rules in payload-automation 0.5.0, which these definitions follow:
  * - A step input value is evaluated only when the whole string is wrapped in `{{ }}`, as one
  *   JSONata expression; anything else is a literal, so strings are built with JSONata's `&`
  *   operator inside a single expression.
  * - Earlier steps are read as ``steps.`<step slug>`.output`` and ``.state``. Steps are also
  *   keyed by their display name, but the slug stays stable when a step is renamed; hyphenated
  *   slugs need the backticks, or JSONata reads the `-` as subtraction.
- * - None of these workflows set `errorHandling`, so a failing step fails the run (`stop`).
+ * - A read-document step returns the matching documents as `output.docs`, the first one (or the
+ *   document read by `id`) as `output.doc`, and the number of matches as `output.totalDocs`.
+ * - None of these workflows set `errorHandling`, so a failing step fails the run (`stop`). The
+ *   workflow `timeout` keeps its default: a run that takes longer than 5 minutes fails.
+ * - A seed definition cannot carry a step's retry settings; the one step that retries gets them
+ *   from `stepRetryPlugin` in src/plugins/automation.ts (see STEP_RETRIES below).
  * - Trigger conditions are plain JSONata (no braces) and see `trigger.doc`, `trigger.previousDoc`,
  *   `trigger.operation` and, for webhooks, the JSON body as `trigger.doc`.
  * - Scheduled triggers expose `trigger.scheduledAt` (the cron occurrence being fired, ISO) and
@@ -48,6 +54,28 @@ export const MORNING_REPORT_SCHEDULE = '0 7 * * *'
 
 /** The studio's timezone, which the morning report's schedule is evaluated in. */
 export const MORNING_REPORT_TIMEZONE = STUDIO_TIME_ZONE
+
+/** Retry settings of one seeded step, as stored on its `automation-steps` document. */
+export interface StepRetry {
+  workflow: string
+  step: string
+  /** Retries after the first attempt, so 2 means up to 3 attempts. */
+  maxRetries: number
+  /** Fixed wait between two attempts, in milliseconds. */
+  retryDelay: number
+}
+
+/** Slug of the kiln alert's HTTP step, which calls the pager and is retried when that fails. */
+export const KILN_PAGER_STEP = 'page-technician'
+
+/**
+ * Seeded steps that are retried when they fail. Paging the kiln technician is a call to another
+ * service, the one step here that can fail for a moment and work a second later; the step only
+ * counts as failed (and fails the run) after its last attempt.
+ */
+export const STEP_RETRIES: StepRetry[] = [
+  { workflow: WORKFLOW_SLUGS.kilnAlert, step: KILN_PAGER_STEP, maxRetries: 2, retryDelay: 500 },
+]
 
 /** Path segment of the kiln alert webhook: POST /api/automation/webhooks/kiln-alert. */
 export const KILN_ALERT_WEBHOOK_PATH = 'kiln-alert'
@@ -220,7 +248,7 @@ export const automationWorkflows = ({
     description:
       'The kiln controller posts its readings to a webhook. Readings at or above ' +
       `${KILN_ALERT_THRESHOLD_C} °C page the kiln technician (an HTTP request to the site's mock ` +
-      'pager), post a "Studio news" notification to members and write a warning to the studio log ' +
+      'pager, retried up to twice when the pager does not answer), post a "Studio news" notification to members and write a warning to the studio log ' +
       'with the pager ticket.',
     triggers: [
       {
@@ -231,8 +259,9 @@ export const automationWorkflows = ({
     ],
     steps: [
       {
+        // Retried up to twice when the pager does not answer (see STEP_RETRIES).
         name: 'Page kiln technician',
-        slug: 'page-technician',
+        slug: KILN_PAGER_STEP,
         type: 'http-request-step',
         input: {
           // The pager URL is resolved at run time (see src/plugins/automation.ts), so the same
@@ -443,7 +472,7 @@ export const automationWorkflows = ({
               '{{$string(steps.`find-classes-today`.output.totalDocs) & ' +
               '(steps.`find-classes-today`.output.totalDocs = 1 ? " class" : " classes") & ' +
               '" in the next 24 hours" & ' +
-              '(steps.`find-classes-today`.output.totalDocs > 0 ? " (" & $join(steps.`find-classes-today`.output.doc.(' +
+              '(steps.`find-classes-today`.output.totalDocs > 0 ? " (" & $join(steps.`find-classes-today`.output.docs.(' +
               studioDateExpr('startsAt') +
               '), ", ") & ")" : "") & ' +
               '"; " & $string(steps.`count-pending-bookings`.output.totalDocs) & ' +
@@ -461,7 +490,7 @@ export const automationWorkflows = ({
         dependencies: ['write-studio-log', 'find-admins'],
         condition: 'steps.`find-admins`.output.totalDocs > 0',
         input: {
-          to: '{{$join(steps.`find-admins`.output.doc.email, ", ")}}',
+          to: '{{$join(steps.`find-admins`.output.docs.email, ", ")}}',
           subject: '{{steps.`write-studio-log`.output.doc.title}}',
           text: '{{steps.`write-studio-log`.output.doc.message & "\\n\\nKiln & Co. automation"}}',
         },

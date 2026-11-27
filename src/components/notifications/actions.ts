@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/auth'
-import { notifyMember, OPTIONAL_CHANNEL_IDS } from '@/lib/notifications'
+import { notifyMember, setFollowedChannels } from '@/lib/notifications'
 import { getPayloadClient } from '@/lib/payload'
 import type { User } from '@/payload-types'
 
@@ -20,17 +20,9 @@ const refresh = () => revalidatePath('/', 'layout')
 /** Saves which broadcast channels the member follows (checkboxes named `channel`). */
 export async function saveNotificationChannels(formData: FormData): Promise<void> {
   const user = await signedIn()
-  const picked = formData.getAll('channel').map(String)
-  const channels = OPTIONAL_CHANNEL_IDS.filter((id) => picked.includes(id))
-  const payload = await getPayloadClient()
-  // Runs with the member's own access rights: members may update only their own user document.
-  await payload.update({
-    collection: 'users',
-    id: user.id,
-    data: { notificationChannels: channels },
-    user,
-    overrideAccess: false,
-  })
+  // Always written for the signed-in member: the plugin keeps one channel-subscription row per
+  // member and channel, and an unticked channel is stored as an opt-out.
+  await setFollowedChannels(await getPayloadClient(), user, formData.getAll('channel').map(String))
   refresh()
 }
 

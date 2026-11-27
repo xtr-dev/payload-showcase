@@ -39,7 +39,7 @@ export const NotificationsShowcase = async () => {
         'Personal notifications (“booking confirmed”, sent when a booking is paid or refunded) and broadcasts (“kiln firing schedule changed”)',
         'Rich-text messages written by staff in the Payload admin',
         'Read and unread state, an unread count in the header and “mark all as read”',
-        'Channels (Bookings, Class reminders, Studio news) that members follow in their settings',
+        'Channels (Bookings, Class reminders, Studio news) with per-member opt-outs: the plugin’s channel subscriptions, changed in the account settings or over REST',
         'Optional web push via the plugin’s service worker, switched on by VAPID keys',
       ]}
       usedOn={[

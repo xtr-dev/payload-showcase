@@ -12,7 +12,12 @@ import {
 import type { CollectionConfig, Endpoint, JobsConfig, Plugin } from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
-import { AUTOMATION_QUEUE, automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
+import {
+  AUTOMATION_QUEUE,
+  automationWorkflows,
+  DEV_WEBHOOK_SECRET,
+  STEP_RETRIES,
+} from '@/seed/automation'
 
 /**
  * @xtr-dev/payload-automation
@@ -21,7 +26,7 @@ import { AUTOMATION_QUEUE, automationWorkflows, DEV_WEBHOOK_SECRET } from '@/see
  * - "Booking confirmed": a bookings afterChange hook with a JSONata condition; reads the session,
  *   workshop and member, emails a confirmation and writes a studio log entry.
  * - "Kiln temperature alert": a webhook trigger with a hashed secret; calls the site's mock pager
- *   over HTTP and logs the alert.
+ *   over HTTP (retried up to twice when the pager fails) and logs the alert.
  * - "Opening hours changed": a site-settings afterChange hook.
  * - "Studio digest": a manual trigger, run from server code by admins (src/lib/automation.ts).
  * - "Morning kiln-room report": a scheduled (cron) trigger, every morning at 07:00 studio time;
@@ -33,10 +38,11 @@ import { AUTOMATION_QUEUE, automationWorkflows, DEV_WEBHOOK_SECRET } from '@/see
  */
 
 /**
- * The kiln alert webhook secret. Development, tests and CI fall back to a public default; a
- * production server without the variable gets a random secret, so the webhook cannot be called
- * until AUTOMATION_WEBHOOK_SECRET is set (the plugin stores the secret's hash when it first seeds
- * the workflow).
+ * The kiln alert webhook secret. Development and tests fall back to a public default; a
+ * production server without the variable gets a new random secret on every start, so the webhook
+ * cannot be called until AUTOMATION_WEBHOOK_SECRET is set. The plugin stores only the secret's
+ * hash, and on every boot updates the seeded trigger to the hash of the secret in use, so
+ * changing the variable and restarting is enough to rotate it.
  */
 const webhookSecret =
   process.env.AUTOMATION_WEBHOOK_SECRET ||
@@ -180,6 +186,51 @@ const automationJobs: Plugin = (config) => {
   }
 }
 
+/**
+ * Turns on retries for the seeded steps listed in STEP_RETRIES. A step's retry settings
+ * (`retryOnFailure`, `maxRetries`, `retryDelay`) are fields of its `automation-steps` document,
+ * and the plugin's `seedWorkflows` definitions have no place for them, so they are written here
+ * once the plugin has seeded the workflows. It must come after `workflowsPlugin` in the plugin
+ * list: its onInit then runs the plugin's seeding first. Safe to run on every boot: a step that
+ * already has the settings is left alone, and a step the plugin recreated gets them again.
+ */
+const stepRetryPlugin: Plugin = (config) => {
+  const incomingOnInit = config.onInit
+  return {
+    ...config,
+    onInit: async (payload) => {
+      await incomingOnInit?.(payload)
+      for (const { workflow: slug, step: stepSlug, maxRetries, retryDelay } of STEP_RETRIES) {
+        const { docs } = await payload.find({
+          collection: 'workflows',
+          where: { slug: { equals: slug } },
+          limit: 1,
+          depth: 1,
+        })
+        const step = docs[0]?.steps?.find((entry) => entry.slug === stepSlug)?.step
+        if (!step || typeof step !== 'object') {
+          payload.logger.warn(`Automation: no step "${stepSlug}" in workflow "${slug}" to retry`)
+          continue
+        }
+        if (
+          step.retryOnFailure === true &&
+          step.maxRetries === maxRetries &&
+          step.retryDelay === retryDelay
+        ) {
+          continue
+        }
+        // Local API with the default overrideAccess: steps of a read-only workflow are locked
+        // for everyone else, admins included.
+        await payload.update({
+          collection: 'automation-steps',
+          id: step.id,
+          data: { retryOnFailure: true, maxRetries, retryDelay },
+        })
+      }
+    },
+  }
+}
+
 export const automation: Plugin[] = [
   studioLogPlugin,
   pagerUrlPlugin,
@@ -201,5 +252,6 @@ export const automation: Plugin[] = [
     // Look for due scheduled triggers every minute, on the queue automationJobs runs.
     scheduledTriggers: { tick: '* * * * *', queue: AUTOMATION_QUEUE },
   }),
+  stepRetryPlugin,
   automationJobs,
 ]
