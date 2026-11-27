@@ -1,6 +1,6 @@
 import { useEcommerce as ecommerceHelpers } from '@xtr-dev/payload-ecommerce'
 import { randomUUID } from 'crypto'
-import type { Payload } from 'payload'
+import { createLocalReq, type Endpoint, type Payload, type PayloadRequest } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { FLAGS_SLUG } from '@/lib/experiments'
@@ -9,17 +9,22 @@ import {
   FREE_SHIPPING_FROM,
   getCartCount,
   getCartView,
+  getOrderForVisitor,
   getStock,
   includedVat,
   MAX_LINE_QUANTITY,
+  orderPath,
+  orderToken,
+  placeOrder,
   quoteCart,
+  restoreCartFromOrder,
   setCartLineQuantity,
   SHIPPING_FLAT,
   shippingFor,
   ShopError,
   toCartSession,
 } from '@/lib/shop'
-import type { Order, Product, User } from '@/payload-types'
+import type { Invoice, Order, Payment, Product, User } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
 import { CATEGORY_SEEDS, COUPON_SEEDS, PRODUCT_SEEDS } from '@/seed/ecommerce'
 
@@ -51,6 +56,58 @@ afterAll(async () => {
   await t?.cleanup()
 })
 
+const DELIVERY = { ...ADDRESS, firstName: 'Guus', lastName: 'Gast' }
+
+const relId = (v: unknown) => (v && typeof v === 'object' ? (v as { id: number }).id : v)
+
+/** Builds a request for calling an endpoint handler directly. */
+const request = async (
+  opts: { user?: User; body?: unknown; routeParams?: Record<string, string> } = {},
+): Promise<PayloadRequest> => {
+  const req = await createLocalReq(
+    { user: opts.user ? { ...opts.user, collection: 'users' } : undefined },
+    payload,
+  )
+  req.routeParams = opts.routeParams
+  req.json = async () => opts.body
+  return req
+}
+
+const paymentOf = async (order: Order): Promise<Payment> =>
+  (
+    await payload.find({
+      collection: 'payments',
+      where: { order: { equals: order.id } },
+      sort: '-createdAt',
+      limit: 1,
+      depth: 0,
+    })
+  ).docs[0]
+
+/** Pays (or declines) a test-provider payment the way its checkout page does. */
+const settle = async (payment: Payment, scenarioId: string): Promise<Payment> => {
+  const process = payload.config.endpoints.find(
+    (e: Endpoint) => e.path === '/payload-billing/test/process' && e.method === 'post',
+  )!
+  const res = await process.handler(
+    await request({ body: { paymentId: payment.providerId, scenarioId, method: 'ideal' } }),
+  )
+  expect(res.status).toBe(200)
+  // The test provider applies the outcome after the scenario's delay (none for instant-success).
+  for (let i = 0; i < 50; i++) {
+    const current = await payload.findByID({ collection: 'payments', id: payment.id })
+    if (current.status !== payment.status) return current
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  throw new Error(`Payment ${payment.id} was not settled`)
+}
+
+const reload = (order: Order) => payload.findByID({ collection: 'orders', id: order.id, depth: 0 })
+
+const usageOf = async (code: string) =>
+  (await payload.find({ collection: 'coupons', where: { code: { equals: code } } })).docs[0]
+    .usageCount
+
 const product = async (title: string): Promise<Product> => {
   const { docs } = await payload.find({
     collection: 'products',
@@ -64,7 +121,7 @@ const variantStock = (p: Product, name: string) =>
   p.variants?.find((v) => v.name === name)?.inventory
 
 /** Places an order for a session's cart the way checkout does: amounts come from the server. */
-const placeOrder = async (
+const orderFromCart = async (
   sessionId: string,
   { couponCode, user }: { couponCode?: string; user?: User } = {},
 ): Promise<Order> => {
@@ -266,11 +323,11 @@ describe('Shop (payload-ecommerce)', () => {
     // Someone else buys the last plate first: the cart shows the problem and the order is refused.
     const other = randomUUID()
     await addToCart(payload, other, { productId: plate.id, quantity: 1 })
-    await placeOrder(other)
+    await orderFromCart(other)
     const cart = await getCartView(payload, session)
     expect(cart.blocked).toBe(true)
     expect(cart.lines[0].problem).toBe('Sold out')
-    await expect(placeOrder(session)).rejects.toThrow('Not enough stock')
+    await expect(orderFromCart(session)).rejects.toThrow('Not enough stock')
     expect((await product('Ochre serving plate')).inventory?.quantity).toBe(0)
   })
 
@@ -314,7 +371,7 @@ describe('Shop (payload-ecommerce)', () => {
     }
 
     // The order is created from the cart with the code, not with the quoted numbers.
-    const order = await placeOrder(session, { couponCode: 'WELCOME10' })
+    const order = await orderFromCart(session, { couponCode: 'WELCOME10' })
     expect(order).toMatchObject({
       subtotal: 5600,
       discount: 560,
@@ -337,11 +394,11 @@ describe('Shop (payload-ecommerce)', () => {
     const bigCart = await getCartView(payload, big)
     expect(bigCart.subtotal).toBeGreaterThanOrEqual(FREE_SHIPPING_FROM)
     expect(await quoteCart(payload, bigCart)).toMatchObject({ shipping: 0, total: 8050 })
-    expect((await placeOrder(big)).total).toBe(8050)
+    expect((await orderFromCart(big)).total).toBe(8050)
 
     const small = randomUUID()
     await addToCart(payload, small, { productId: tools.id, quantity: 1 })
-    const shipped = await placeOrder(small, { couponCode: 'FREESHIP' })
+    const shipped = await orderFromCart(small, { couponCode: 'FREESHIP' })
     expect(shipped).toMatchObject({ subtotal: 2450, shipping: 0, total: 2450 })
   })
 
@@ -359,7 +416,7 @@ describe('Shop (payload-ecommerce)', () => {
     expect(low.couponError).toBe('This code works from €40.')
 
     await addToCart(payload, session, { productId: bowl.id, quantity: 1 })
-    const order = await placeOrder(session, { couponCode: 'STUDIO5', user: mara })
+    const order = await orderFromCart(session, { couponCode: 'STUDIO5', user: mara })
     expect(order).toMatchObject({ subtotal: 5850, discount: 500, total: 5350 + SHIPPING_FLAT })
     expect(typeof order.user === 'object' ? order.user?.id : order.user).toBe(mara.id)
 
@@ -377,7 +434,7 @@ describe('Shop (payload-ecommerce)', () => {
     const own = await payload.find({ collection: 'orders', user: mara, overrideAccess: false })
     expect(own.totalDocs).toBe(1)
     const other = await payload.find({ collection: 'orders', user: jonas, overrideAccess: false })
-    expect(other.totalDocs).toBe(0)
+    expect(other.docs.some((o) => o.id === own.docs[0].id)).toBe(false)
     await expect(
       payload.findByID({
         collection: 'orders',
@@ -395,6 +452,252 @@ describe('Shop (payload-ecommerce)', () => {
         overrideAccess: false,
       }),
     ).rejects.toThrow()
+  })
+
+  describe('checkout', () => {
+    it('validates the delivery form on the server', async () => {
+      const session = randomUUID()
+      await addToCart(payload, session, {
+        productId: (await product('Breakfast bowl')).id,
+        quantity: 1,
+      })
+      const attempt = (raw: Record<string, unknown>, user?: User) =>
+        placeOrder(payload, session, user, raw).then(
+          () => ({}),
+          (error) =>
+            (error as { fields?: Record<string, string> }).fields ?? { other: String(error) },
+        )
+
+      expect(Object.keys(await attempt({})).sort()).toEqual([
+        'address1',
+        'city',
+        'country',
+        'email',
+        'firstName',
+        'lastName',
+        'postalCode',
+      ])
+      // A signed-in member needs no email; a guest needs a real one.
+      expect(await attempt({ ...DELIVERY, email: 'not-an-email' })).toHaveProperty('email')
+      expect(await attempt({ ...DELIVERY, country: 'US', email: 'g@kiln.test' })).toEqual({
+        country: 'Choose one of the countries we ship to.',
+      })
+      expect(
+        await attempt({
+          ...DELIVERY,
+          firstName: 'x'.repeat(81),
+          postalCode: '<b>',
+          email: 'g@kiln.test',
+        }),
+      ).toEqual({
+        firstName: 'Keep your first name under 80 characters.',
+        postalCode: 'That doesn’t look like a postcode.',
+      })
+      // Nothing was ordered by any of these.
+      expect((await getCartView(payload, session)).count).toBe(1)
+      await expect(placeOrder(payload, randomUUID(), mara, DELIVERY)).rejects.toThrow(
+        'cart is empty',
+      )
+      await expect(
+        placeOrder(payload, session, null, {
+          ...DELIVERY,
+          email: 'g@kiln.test',
+          couponCode: 'NOPE',
+        }),
+      ).rejects.toThrow('discount code wasn’t applied')
+    })
+
+    it('lets a guest order, pay through the test provider and come back with the token', async () => {
+      const session = randomUUID()
+      const mug = await product('Speckled mug')
+      const before = variantStock(mug, 'Oat')!
+      await addToCart(payload, session, { productId: mug.id, variant: 'Oat', quantity: 2 })
+
+      const { order, redirectTo } = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: ' Guus@Kiln.Test ',
+        couponCode: 'welcome10',
+        // Amounts in the form are ignored: the order is priced on the server.
+        total: 1,
+        subtotal: 1,
+        shipping: 0,
+        discount: 5599,
+      })
+      expect(redirectTo).toMatch(/^\/api\/payload-billing\/test\/payment\/test_pay_/)
+      expect(order).toMatchObject({
+        subtotal: 5600,
+        discount: 560,
+        shipping: SHIPPING_FLAT,
+        total: 5735,
+        status: 'pending',
+        paymentStatus: 'pending',
+        customerEmail: 'guus@kiln.test',
+      })
+      expect(order.user ?? null).toBeNull()
+      expect(variantStock(await product('Speckled mug'), 'Oat')).toBe(before - 2)
+      expect((await getCartView(payload, session)).count).toBe(0)
+
+      const payment = await paymentOf(order)
+      expect(payment).toMatchObject({ amount: 5735, currency: 'EUR', status: 'pending' })
+      expect(payment.member ?? null).toBeNull()
+      expect(payment.redirectUrl).toBe(orderPath(payload, order))
+      const invoice = (await payload.findByID({
+        collection: 'invoices',
+        id: relId(payment.invoice) as number,
+      })) as Invoice
+      expect(invoice.customer ?? null).toBeNull()
+      expect(invoice.customerInfo).toMatchObject({ name: 'Guus Gast', email: 'guus@kiln.test' })
+      expect(invoice.amount).toBe(order.total)
+      expect(invoice.items.map((i) => [i.description, i.quantity, i.unitAmount])).toEqual([
+        ['2 × Speckled mug (Oat), less €5.60 discount', 1, 5040],
+        ['Shipping', 1, SHIPPING_FLAT],
+      ])
+
+      await settle(payment, 'instant-success')
+      expect(await reload(order)).toMatchObject({
+        status: 'processing',
+        paymentStatus: 'paid',
+        paymentMethod: 'test',
+      })
+      expect((await payload.findByID({ collection: 'invoices', id: invoice.id })).status).toBe(
+        'paid',
+      )
+
+      // The order page: only with the token, as the member who placed it, or as an admin.
+      const number = order.orderNumber!
+      const token = orderToken(payload, number)
+      const see = (opts: Parameters<typeof getOrderForVisitor>[2]) =>
+        getOrderForVisitor(payload, number, opts)
+      expect((await see({ token }))?.id).toBe(order.id)
+      expect((await see({ user: ctx.admin }))?.id).toBe(order.id)
+      for (const wrong of [
+        undefined,
+        '',
+        token.slice(1),
+        `${token}0`,
+        orderToken(payload, 'ORD-1'),
+      ]) {
+        expect(await see({ token: wrong })).toBeNull()
+      }
+      expect(await see({ user: mara })).toBeNull()
+      expect(await getOrderForVisitor(payload, 'ORD-0-000', { token })).toBeNull()
+      expect(await getOrderForVisitor(payload, `${number}' OR 1=1`, { token })).toBeNull()
+      // And never through the API.
+      await expect(
+        payload.findByID({ collection: 'orders', id: order.id, overrideAccess: false }),
+      ).rejects.toThrow()
+      const asMara = await payload.find({
+        collection: 'payments',
+        where: { order: { equals: order.id } },
+        user: mara,
+        overrideAccess: false,
+      })
+      expect(asMara.totalDocs).toBe(0)
+    })
+
+    it('ties a member’s order, payment and invoice to their account', async () => {
+      const session = randomUUID()
+      const bowl = await product('Breakfast bowl')
+      await addToCart(payload, session, { productId: bowl.id, quantity: 1 })
+      // The email in the form is ignored for a member.
+      const { order } = await placeOrder(payload, session, jonas, {
+        ...DELIVERY,
+        email: 'x@evil.test',
+      })
+      expect(relId(order.user)).toBe(jonas.id)
+      expect(order.customerEmail).toBe(jonas.email)
+      expect(order.total).toBe(3400 + SHIPPING_FLAT)
+
+      const payment = await paymentOf(order)
+      expect(relId(payment.member)).toBe(jonas.id)
+      const invoice = await payload.findByID({
+        collection: 'invoices',
+        id: relId(payment.invoice) as number,
+        depth: 0,
+      })
+      expect(invoice.customer).toBe(jonas.id)
+      expect(invoice.customerInfo).toMatchObject({ name: jonas.name, email: jonas.email })
+      expect(invoice.items.map((i) => [i.description, i.quantity, i.unitAmount])).toEqual([
+        ['Breakfast bowl', 1, 3400],
+        ['Shipping', 1, SHIPPING_FLAT],
+      ])
+      await settle(payment, 'instant-success')
+
+      const number = order.orderNumber!
+      expect((await getOrderForVisitor(payload, number, { user: jonas }))?.id).toBe(order.id)
+      expect(await getOrderForVisitor(payload, number, { user: mara })).toBeNull()
+      const own = await payload.find({ collection: 'orders', user: jonas, overrideAccess: false })
+      expect(own.docs.map((o) => o.id)).toContain(order.id)
+
+      // The same browser, signed out again: the next order belongs to nobody.
+      await addToCart(payload, session, { productId: bowl.id, quantity: 1 })
+      const guest = await placeOrder(payload, session, null, { ...DELIVERY, email: 'g@kiln.test' })
+      expect(guest.order.user ?? null).toBeNull()
+      await settle(await paymentOf(guest.order), 'instant-success')
+    })
+
+    it('cancels the order and restocks when the payment fails, and can refill the cart', async () => {
+      const session = randomUUID()
+      const mug = await product('Speckled mug')
+      const before = variantStock(mug, 'Cobalt')!
+      const used = (await usageOf('FREESHIP')) ?? 0
+      await addToCart(payload, session, { productId: mug.id, variant: 'Cobalt', quantity: 1 })
+      const { order } = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'g@kiln.test',
+        couponCode: 'FREESHIP',
+      })
+      expect(order).toMatchObject({ shipping: 0, total: 3200 })
+      expect(variantStock(await product('Speckled mug'), 'Cobalt')).toBe(before - 1)
+      expect(await usageOf('FREESHIP')).toBe(used + 1)
+
+      await settle(await paymentOf(order), 'declined-payment')
+      const cancelled = await payload.findByID({ collection: 'orders', id: order.id, depth: 1 })
+      expect(cancelled).toMatchObject({ status: 'cancelled', paymentStatus: 'failed' })
+      expect(variantStock(await product('Speckled mug'), 'Cobalt')).toBe(before)
+      expect(await usageOf('FREESHIP')).toBe(used)
+
+      expect(await restoreCartFromOrder(payload, session, cancelled)).toBe(1)
+      expect(await getCartView(payload, session)).toMatchObject({ count: 1, subtotal: 3200 })
+      // Only a cancelled order can be put back.
+      const paid = (
+        await payload.find({
+          collection: 'orders',
+          where: { status: { equals: 'processing' } },
+          depth: 1,
+        })
+      ).docs[0]
+      await expect(restoreCartFromOrder(payload, session, paid)).rejects.toThrow('can’t be changed')
+    })
+
+    it('lets an admin refund an order, which restocks it', async () => {
+      const session = randomUUID()
+      const tools = await product('Trimming tool set')
+      const before = tools.inventory!.quantity!
+      await addToCart(payload, session, { productId: tools.id, quantity: 2 })
+      const { order } = await placeOrder(payload, session, mara, DELIVERY)
+      await settle(await paymentOf(order), 'instant-success')
+      expect((await product('Trimming tool set')).inventory?.quantity).toBe(before - 2)
+
+      const orders = payload.config.collections.find((c) => c.slug === 'orders')!
+      const refund = (orders.endpoints || []).find((e) => e.path === '/:id/refund')!.handler
+      const routeParams = { id: String(order.id) }
+      expect((await refund(await request({ routeParams }))).status).toBe(403)
+      expect((await refund(await request({ user: mara, routeParams }))).status).toBe(403)
+
+      const res = await refund(await request({ user: ctx.admin, routeParams }))
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.refund.status).toBe('succeeded')
+      expect(body.order).toEqual({ status: 'refunded', paymentStatus: 'refunded' })
+      expect((await product('Trimming tool set')).inventory?.quantity).toBe(before)
+
+      // Nothing is left to refund.
+      expect((await refund(await request({ user: ctx.admin, routeParams }))).status).toBe(409)
+      expect(
+        (await refund(await request({ user: ctx.admin, routeParams: { id: '999999' } }))).status,
+      ).toBe(404)
+    })
   })
 
   it('hides the shop while the flag is off', async () => {

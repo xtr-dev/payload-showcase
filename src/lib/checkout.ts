@@ -28,7 +28,7 @@ const relId = (value: unknown): number | undefined => {
 }
 
 /** Absolute site origin for providers that redirect from their own domain (Mollie). */
-const siteOrigin = (): string =>
+export const siteOrigin = (): string =>
   (process.env.PAYLOAD_SERVER_URL || process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000')
     .trim()
     .replace(/\/$/, '')

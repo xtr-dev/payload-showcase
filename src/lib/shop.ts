@@ -5,10 +5,13 @@ import {
   // react-hooks lint rule from treating these plain server functions as components.
   useEcommerce as ecommerceHelpers,
 } from '@xtr-dev/payload-ecommerce'
+import { createHmac, timingSafeEqual } from 'crypto'
 import type { Payload } from 'payload'
 
-import type { Cart, Category, Coupon, Media, Product, User } from '@/payload-types'
+import type { Cart, Category, Coupon, Media, Order, Product, User } from '@/payload-types'
+import { checkoutProvider } from '@/plugins/billing'
 
+import { paymentLink, siteOrigin } from './checkout'
 import { asMedia, formatPrice } from './format'
 
 /**
@@ -19,6 +22,10 @@ import { asMedia, formatPrice } from './format'
  * cookie, see src/proxy.ts) and only ever loads the cart stored under it: a cart id, a price or a
  * total never comes from the browser. Product ids from the browser are read with the public access
  * rule, so only active products can be added.
+ *
+ * Checkout (`placeOrder`) creates the order from that cart with the plugin, which prices the lines
+ * and applies the coupon itself, and then starts a payment through @xtr-dev/payload-billing. A
+ * guest reaches their order afterwards with a signed token in the order page's URL.
  *
  * Nothing here reads cookies or imports the Payload config, so the integration tests call these
  * functions directly; the server actions in src/components/shop/actions.ts are thin wrappers.
@@ -417,4 +424,335 @@ export const getShopCategories = async (payload: Payload): Promise<Category[]> =
     overrideAccess: false,
   })
   return docs
+}
+
+/** Where the shop ships to. The checkout form offers these and the server accepts no other. */
+export const SHIPPING_COUNTRIES = [
+  { code: 'NL', name: 'Netherlands' },
+  { code: 'BE', name: 'Belgium' },
+  { code: 'DE', name: 'Germany' },
+] as const
+
+export type CheckoutField =
+  'email' | 'firstName' | 'lastName' | 'address1' | 'address2' | 'postalCode' | 'city' | 'country'
+
+export type CheckoutValues = Partial<Record<CheckoutField, string>>
+
+/** A checkout form that was filled in wrongly; `fields` says which inputs and why. */
+export class CheckoutError extends ShopError {
+  constructor(public fields: CheckoutValues) {
+    super('Check the marked fields.')
+  }
+}
+
+const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+
+/**
+ * Checks the checkout form. Everything is trimmed and length-limited here, on the server; the
+ * form's own `required` and `maxLength` attributes are only a convenience. A signed-in member's
+ * email comes from their account, never from the form.
+ */
+const validateCheckout = (
+  raw: Record<string, unknown>,
+  user: Pick<User, 'email'> | null | undefined,
+): Required<Omit<CheckoutValues, 'address2'>> & { address2?: string } => {
+  const errors: CheckoutValues = {}
+  const required = (field: CheckoutField, label: string, max: number): string => {
+    const value = text(raw[field])
+    if (!value) errors[field] = `Enter your ${label}.`
+    else if (value.length > max) errors[field] = `Keep your ${label} under ${max} characters.`
+    return value
+  }
+
+  const email = user ? user.email : text(raw.email).toLowerCase()
+  if (!user && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))) {
+    errors.email = 'Enter an email address we can send your confirmation to.'
+  }
+  const firstName = required('firstName', 'first name', 80)
+  const lastName = required('lastName', 'last name', 80)
+  const address1 = required('address1', 'street and house number', 120)
+  const city = required('city', 'town or city', 80)
+  const postalCode = required('postalCode', 'postcode', 12)
+  if (postalCode && !errors.postalCode && !/^[A-Za-z0-9][A-Za-z0-9 -]+$/.test(postalCode)) {
+    errors.postalCode = 'That doesn’t look like a postcode.'
+  }
+  const address2 = text(raw.address2)
+  if (address2.length > 120) errors.address2 = 'Keep this under 120 characters.'
+  const country = text(raw.country).toUpperCase()
+  if (!SHIPPING_COUNTRIES.some((c) => c.code === country)) {
+    errors.country = 'Choose one of the countries we ship to.'
+  }
+
+  if (Object.keys(errors).length > 0) throw new CheckoutError(errors)
+  return {
+    email,
+    firstName,
+    lastName,
+    address1,
+    city,
+    postalCode,
+    country,
+    ...(address2 ? { address2 } : {}),
+  }
+}
+
+/**
+ * The token that lets whoever holds it see one order: an HMAC of the order number under the
+ * Payload secret. It is put in the order page's URL (`/shop/orders/ORD-…?t=…`) for the customer
+ * who placed the order, so a guest can come back to it, and it cannot be worked out from the
+ * order number alone.
+ */
+export const orderToken = (payload: Payload, orderNumber: string): string =>
+  createHmac('sha256', payload.secret)
+    .update(`shop-order:${orderNumber}`)
+    .digest('hex')
+    .slice(0, 40)
+
+const isOrderToken = (payload: Payload, orderNumber: string, token: unknown): boolean => {
+  if (typeof token !== 'string' || !/^[0-9a-f]{40}$/.test(token)) return false
+  return timingSafeEqual(Buffer.from(token), Buffer.from(orderToken(payload, orderNumber)))
+}
+
+/** The order page's path including its token. Only hand this to the order's own customer. */
+export const orderPath = (payload: Payload, order: Pick<Order, 'orderNumber'>): string => {
+  const number = order.orderNumber ?? ''
+  return `/shop/orders/${encodeURIComponent(number)}?t=${orderToken(payload, number)}`
+}
+
+const relId = (value: unknown): number | undefined =>
+  value && typeof value === 'object' ? (value as { id: number }).id : (value as number | undefined)
+
+/**
+ * The order with this number, but only for someone allowed to see it: the holder of its token,
+ * the signed-in member who placed it, or an admin. Anyone else gets null, exactly as for an
+ * order number that does not exist, so order numbers cannot be probed.
+ */
+export const getOrderForVisitor = async (
+  payload: Payload,
+  orderNumber: unknown,
+  { token, user }: { token?: unknown; user?: Pick<User, 'id' | 'role'> | null },
+): Promise<Order | null> => {
+  if (typeof orderNumber !== 'string' || !/^[A-Za-z0-9-]{1,60}$/.test(orderNumber)) return null
+  const { docs } = await payload.find({
+    collection: 'orders',
+    where: { orderNumber: { equals: orderNumber } },
+    depth: 2,
+    limit: 1,
+  })
+  const order = docs[0]
+  if (!order) return null
+  const allowed =
+    isOrderToken(payload, orderNumber, token) ||
+    (!!user && (user.role === 'admin' || relId(order.user) === user.id))
+  return allowed ? order : null
+}
+
+/** "Speckled mug (Cobalt)" for an order line, from its populated product. */
+export const orderLineLabel = (item: Order['items'][number]): string => {
+  const title = typeof item.product === 'object' ? item.product.title : 'Item'
+  return item.variant ? `${title} (${item.variant})` : title
+}
+
+/**
+ * Invoice lines that add up to the order's total. Billing invoice lines cannot be negative, so
+ * an order with a discount is invoiced as one goods line at the discounted amount, with the
+ * items and the discount spelled out in its description. Amounts include VAT, like every invoice
+ * on the site.
+ */
+const invoiceItems = (order: Order) => {
+  const goods = order.items.map((item) => ({
+    description: orderLineLabel(item),
+    quantity: item.quantity,
+    unitAmount: item.price,
+  }))
+  const discount = order.discount ?? 0
+  const lines =
+    discount > 0
+      ? [
+          {
+            description: `${goods.map((g) => `${g.quantity} × ${g.description}`).join(', ')}, less ${formatPrice(discount)} discount`,
+            quantity: 1,
+            unitAmount: order.subtotal - discount,
+          },
+        ]
+      : goods
+  const shipping = order.shipping ?? 0
+  return shipping > 0
+    ? [...lines, { description: 'Shipping', quantity: 1, unitAmount: shipping }]
+    : lines
+}
+
+/**
+ * Starts the payment for a freshly placed order: an open invoice (for the member, or for a guest
+ * under the name and email they gave) and a payment linked to it and to the order. Creating the
+ * payment makes the billing plugin ask the provider for a checkout. After paying, the provider
+ * sends the customer to the order page, and the payment's status change marks the order paid or
+ * cancels it; see `syncOrder` in src/plugins/ecommerce.ts.
+ */
+export const beginOrderCheckout = async ({
+  payload,
+  order: placed,
+  user,
+}: {
+  payload: Payload
+  order: Pick<Order, 'id'>
+  user?: Pick<User, 'id'> | null
+}): Promise<{ redirectTo: string }> => {
+  const order = await payload.findByID({ collection: 'orders', id: placed.id, depth: 1 })
+  const page = orderPath(payload, order)
+
+  // Nothing to pay (a coupon covered everything): payments must be at least one cent.
+  if (!order.total) {
+    await payload.update({
+      collection: 'orders',
+      id: order.id,
+      data: { status: 'processing', paymentStatus: 'paid' },
+    })
+    return { redirectTo: page }
+  }
+
+  const address = order.shippingAddress
+  const invoice = await payload.create({
+    collection: 'invoices',
+    data: {
+      customer: user?.id,
+      // A member's name and email are filled in from their account (src/plugins/billing.ts).
+      customerInfo: user
+        ? undefined
+        : { name: `${address?.firstName} ${address?.lastName}`, email: order.customerEmail },
+      currency: 'EUR',
+      status: 'open',
+      items: invoiceItems(order),
+      notes: `Shop order ${order.orderNumber}`,
+      metadata: { order: order.orderNumber },
+    },
+  })
+  const provider = checkoutProvider()
+  const payment = await payload.create({
+    collection: 'payments',
+    data: {
+      provider,
+      status: 'pending',
+      amount: order.total,
+      currency: 'EUR',
+      description: `Shop order ${order.orderNumber}`,
+      invoice: invoice.id,
+      member: user?.id,
+      order: order.id,
+      // The test provider redirects from a page on this site, so a path works on any host and
+      // port; other providers need an absolute URL.
+      redirectUrl: provider === 'test' ? page : `${siteOrigin()}${page}`,
+      metadata: { invoice: invoice.number, order: order.orderNumber },
+    },
+  })
+  await payload.update({
+    collection: 'invoices',
+    id: invoice.id,
+    data: { payment: payment.id },
+  })
+  return { redirectTo: paymentLink(payment) }
+}
+
+/**
+ * Checkout: turns this session's cart into an order and starts its payment.
+ *
+ * The browser supplies an address, an email (guests only) and optionally a coupon code; nothing
+ * else. The cart is the one stored under the session, the lines are priced by the plugin from the
+ * products, shipping is worked out here, and the coupon is validated and applied by the plugin
+ * when it creates the order. Creating the order takes the stock, so an order that turns out to be
+ * unpayable is cancelled again to release it.
+ */
+export const placeOrder = async (
+  payload: Payload,
+  sessionId: string,
+  user: Pick<User, 'id' | 'email'> | null | undefined,
+  raw: Record<string, unknown>,
+): Promise<{ order: Order; redirectTo: string }> => {
+  const form = validateCheckout(raw, user)
+  const cart = await getCartView(payload, sessionId)
+  if (!cart.id || cart.lines.length === 0) throw new ShopError('Your cart is empty.')
+  if (cart.blocked) {
+    throw new ShopError('Some items in your cart can’t be ordered any more. Check your cart.')
+  }
+
+  const couponCode = text(raw.couponCode)
+  const quote = await quoteCart(payload, cart, { couponCode, user })
+  if (quote.couponError)
+    throw new ShopError(`Your discount code wasn’t applied. ${quote.couponError}`)
+
+  // The plugin copies the cart's user to the order. The cart belongs to the browser, so it is set
+  // on every checkout: to the member who is signed in now, or to nobody.
+  await payload.update({
+    collection: 'carts',
+    id: cart.id,
+    data: { user: user?.id ?? null },
+  })
+
+  const { orders } = ecommerceHelpers(payload)
+  let order: Order
+  try {
+    order = (await orders.createOrderFromCart({
+      cartId: cart.id,
+      orderData: {
+        customerEmail: form.email,
+        shippingAddress: {
+          firstName: form.firstName,
+          lastName: form.lastName,
+          address1: form.address1,
+          address2: form.address2,
+          postalCode: form.postalCode,
+          city: form.city,
+          country: form.country,
+        },
+        shipping: shippingFor(cart.subtotal),
+        couponCode: quote.coupon?.code,
+        paymentMethod: checkoutProvider(),
+      },
+    })) as Order
+  } catch (error) {
+    // The plugin's own refusals (someone else just bought the last one, the coupon ran out) are
+    // written for customers; anything else is logged and kept vague.
+    const reason = error instanceof Error ? error.message : ''
+    if (/^Not enough stock|^Coupon/.test(reason)) {
+      throw new ShopError(`${reason}. Check your cart and try again.`)
+    }
+    payload.logger.error({ err: error }, 'Shop order could not be created')
+    throw new ShopError('We couldn’t place your order. Please try again.')
+  }
+
+  try {
+    const { redirectTo } = await beginOrderCheckout({ payload, order, user })
+    return { order, redirectTo }
+  } catch (error) {
+    payload.logger.error({ err: error }, `Payment for order ${order.orderNumber} could not start`)
+    await orders.updateOrderStatus({ orderId: order.id, status: 'cancelled' })
+    throw new ShopError('We couldn’t start the payment, so nothing was ordered or charged.')
+  }
+}
+
+/**
+ * Puts the lines of a cancelled order back into this session's cart, for a customer whose payment
+ * did not go through. Lines that are no longer for sale or in stock are skipped; the number of
+ * lines that made it is returned.
+ */
+export const restoreCartFromOrder = async (
+  payload: Payload,
+  sessionId: string,
+  order: Order,
+): Promise<number> => {
+  if (order.status !== 'cancelled') throw new ShopError('This order can’t be changed any more.')
+  let restored = 0
+  for (const item of order.items) {
+    try {
+      await addToCart(payload, sessionId, {
+        productId: relId(item.product),
+        variant: item.variant,
+        quantity: item.quantity,
+      })
+      restored += 1
+    } catch (error) {
+      if (!(error instanceof ShopError)) throw error
+    }
+  }
+  return restored
 }

@@ -4,11 +4,13 @@ import Link from 'next/link'
 import { LogoutButton } from '@/components/layout/LogoutButton'
 import { Alert, Badge, ButtonLink, Card, Container } from '@/components/ui'
 import { requireUser } from '@/lib/auth'
+import { isEnabled } from '@/lib/flags'
 import { formatPrice } from '@/lib/format'
 
 import { BillingSection } from './sections/Billing'
 import { BookingsSection } from './sections/Bookings'
 import { NotificationsSection } from './sections/Notifications'
+import { OrdersSection } from './sections/Orders'
 import { SettingsSection } from './sections/Settings'
 
 export const metadata: Metadata = { title: 'My studio', robots: { index: false } }
@@ -29,6 +31,7 @@ export default async function AccountPage({
   const params = await searchParams
   const plan = typeof user.membershipPlan === 'object' ? user.membershipPlan : null
   const status = user.membershipStatus ?? 'none'
+  const shop = await isEnabled('shop')
 
   return (
     <Container className="py-12 lg:py-16">
@@ -63,6 +66,7 @@ export default async function AccountPage({
       <div className="mt-10 grid gap-8 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-8">
           <BookingsSection user={user} />
+          {shop && <OrdersSection user={user} />}
           <BillingSection user={user} />
           <NotificationsSection user={user} />
         </div>
