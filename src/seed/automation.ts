@@ -11,10 +11,14 @@ import type { SeedContext } from './types'
  * `seedWorkflows` option, which creates each one (with its triggers and steps) on boot when no
  * workflow with that slug exists yet, and marks it read-only in the admin panel.
  *
- * Expression rules in payload-automation 0.3.0, which these definitions follow:
- * - A step input value that starts with `{{` is evaluated as one JSONata expression; text around
- *   it is not interpolated, so strings are built with JSONata's `&` operator.
- * - Earlier steps are read as ``steps.`<step name>`.output`` (keyed by the step's name).
+ * Expression rules in payload-automation 0.4.0, which these definitions follow:
+ * - A step input value is evaluated only when the whole string is wrapped in `{{ }}`, as one
+ *   JSONata expression; anything else is a literal, so strings are built with JSONata's `&`
+ *   operator inside a single expression.
+ * - Earlier steps are read as ``steps.`<step slug>`.output`` and ``.state``. Steps are also
+ *   keyed by their display name, but the slug stays stable when a step is renamed; hyphenated
+ *   slugs need the backticks, or JSONata reads the `-` as subtraction.
+ * - None of these workflows set `errorHandling`, so a failing step fails the run (`stop`).
  * - Trigger conditions are plain JSONata (no braces) and see `trigger.doc`, `trigger.previousDoc`,
  *   `trigger.operation` and, for webhooks, the JSON body as `trigger.doc`.
  * - Scheduled triggers expose `trigger.scheduledAt` (the cron occurrence being fired, ISO) and
@@ -29,6 +33,9 @@ export const WORKFLOW_SLUGS = {
   studioDigest: 'studio-digest',
   morningReport: 'morning-kiln-room-report',
 } as const
+
+/** Slug of the studio digest's email step, whose result src/lib/automation.ts reads. */
+export const STUDIO_DIGEST_EMAIL_STEP = 'email-digest'
 
 /**
  * Jobs queue of the plugin's scheduled-triggers task. src/plugins/automation.ts registers the task
@@ -107,7 +114,7 @@ export const automationWorkflows = ({
         dependencies: ['read-session'],
         input: {
           collectionSlug: 'workshops',
-          id: `{{${relIdExpr('steps.`Read session`.output.doc.workshop')}}}`,
+          id: `{{${relIdExpr('steps.`read-session`.output.doc.workshop')}}}`,
           depth: 0,
         },
       },
@@ -162,14 +169,14 @@ export const automationWorkflows = ({
         slug: 'send-tips',
         type: 'create-document',
         dependencies: ['read-workshop', 'find-earlier-tips'],
-        condition: 'steps.`Find earlier tips`.output.totalDocs = 0',
+        condition: 'steps.`find-earlier-tips`.output.totalDocs = 0',
         input: {
           collectionSlug: 'notifications',
           data: {
-            title: '{{"Getting ready for " & steps.`Read workshop`.output.doc.title}}',
+            title: '{{"Getting ready for " & steps.`read-workshop`.output.doc.title}}',
             message: richText(
               '{{"Your class starts " & ' +
-                studioDateExpr('steps.`Read session`.output.doc.startsAt') +
+                studioDateExpr('steps.`read-session`.output.doc.startsAt') +
                 ' & ". Wear clothes that can take a splash of slip, keep your nails short and ' +
                 'tie back long hair. Aprons, tools and clay are on us."}}',
               'Arrive ten minutes early for tea and a spot at the wheel.',
@@ -188,17 +195,17 @@ export const automationWorkflows = ({
         input: {
           collectionSlug: 'studio-log',
           data: {
-            title: '{{"Seat confirmed: " & steps.`Read workshop`.output.doc.title}}',
+            title: '{{"Seat confirmed: " & steps.`read-workshop`.output.doc.title}}',
             // Public text: no member name, email or booking reference.
             message:
               '{{"A seat for " & ' +
-              studioDateExpr('steps.`Read session`.output.doc.startsAt') +
+              studioDateExpr('steps.`read-session`.output.doc.startsAt') +
               ' & " was confirmed. Confirmation email: " & ' +
-              '(steps.`Find confirmation email`.output.totalDocs > 0 ? "queued by mailing" : "not found") & ' +
+              '(steps.`find-confirmation-email`.output.totalDocs > 0 ? "queued by mailing" : "not found") & ' +
               '". Inbox message: " & ' +
-              '(steps.`Find confirmation notification`.output.totalDocs > 0 ? "sent by notifications" : "not found") & ' +
+              '(steps.`find-confirmation-notification`.output.totalDocs > 0 ? "sent by notifications" : "not found") & ' +
               '". What-to-bring tips: " & ' +
-              '(steps.`Send what-to-bring tips`.state = "succeeded" ? "sent" : "already sent earlier") & "."}}',
+              '(steps.`send-tips`.state = "succeeded" ? "sent" : "already sent earlier") & "."}}',
             source: 'booking',
             severity: 'info',
             booking: '{{trigger.doc.id}}',
@@ -250,7 +257,7 @@ export const automationWorkflows = ({
             title:
               '{{"Kiln alert: " & $string(trigger.doc.kiln) & " at " & $string($number(trigger.doc.temperatureC)) & " °C"}}',
             message:
-              '{{"Paged " & steps.`Page kiln technician`.output.data.onCall & " (ticket " & steps.`Page kiln technician`.output.data.ticket & ")."}}',
+              '{{"Paged " & steps.`page-technician`.output.data.onCall & " (ticket " & steps.`page-technician`.output.data.ticket & ")."}}',
             source: 'webhook',
             severity: 'warning',
           },
@@ -344,7 +351,7 @@ export const automationWorkflows = ({
           data: {
             title: 'Studio digest',
             message:
-              '{{$string(steps.`Count confirmed bookings`.output.totalDocs) & " confirmed bookings and " & $string(steps.`Count log entries`.output.totalDocs) & " earlier log entries."}}',
+              '{{$string(steps.`count-bookings`.output.totalDocs) & " confirmed bookings and " & $string(steps.`count-log`.output.totalDocs) & " earlier log entries."}}',
             source: 'manual',
             severity: 'info',
           },
@@ -352,13 +359,13 @@ export const automationWorkflows = ({
       },
       {
         name: 'Email digest',
-        slug: 'email-digest',
+        slug: STUDIO_DIGEST_EMAIL_STEP,
         type: 'send-email',
         dependencies: ['write-studio-log'],
         input: {
           to: '{{trigger.data.sendTo}}',
           subject: 'Kiln & Co. studio digest',
-          text: '{{steps.`Write studio log`.output.doc.message}}',
+          text: '{{steps.`write-studio-log`.output.doc.message}}',
         },
       },
     ],
@@ -433,14 +440,14 @@ export const automationWorkflows = ({
               '{{"Morning report: " & $fromMillis($toMillis(trigger.scheduledAt), "[FNn] [D] [MNn]", "+0100")}}',
             // Public text: counts and class times only.
             message:
-              '{{$string(steps.`Find classes today`.output.totalDocs) & ' +
-              '(steps.`Find classes today`.output.totalDocs = 1 ? " class" : " classes") & ' +
+              '{{$string(steps.`find-classes-today`.output.totalDocs) & ' +
+              '(steps.`find-classes-today`.output.totalDocs = 1 ? " class" : " classes") & ' +
               '" in the next 24 hours" & ' +
-              '(steps.`Find classes today`.output.totalDocs > 0 ? " (" & $join(steps.`Find classes today`.output.doc.(' +
+              '(steps.`find-classes-today`.output.totalDocs > 0 ? " (" & $join(steps.`find-classes-today`.output.doc.(' +
               studioDateExpr('startsAt') +
               '), ", ") & ")" : "") & ' +
-              '"; " & $string(steps.`Count pending bookings`.output.totalDocs) & ' +
-              '(steps.`Count pending bookings`.output.totalDocs = 1 ? " booking" : " bookings") & ' +
+              '"; " & $string(steps.`count-pending-bookings`.output.totalDocs) & ' +
+              '(steps.`count-pending-bookings`.output.totalDocs = 1 ? " booking" : " bookings") & ' +
               '" waiting for payment."}}',
             source: 'schedule',
             severity: 'info',
@@ -452,11 +459,11 @@ export const automationWorkflows = ({
         slug: 'email-admins',
         type: 'send-email',
         dependencies: ['write-studio-log', 'find-admins'],
-        condition: 'steps.`Find studio admins`.output.totalDocs > 0',
+        condition: 'steps.`find-admins`.output.totalDocs > 0',
         input: {
-          to: '{{$join(steps.`Find studio admins`.output.doc.email, ", ")}}',
-          subject: '{{steps.`Write studio log`.output.doc.title}}',
-          text: '{{steps.`Write studio log`.output.doc.message & "\\n\\nKiln & Co. automation"}}',
+          to: '{{$join(steps.`find-admins`.output.doc.email, ", ")}}',
+          subject: '{{steps.`write-studio-log`.output.doc.title}}',
+          text: '{{steps.`write-studio-log`.output.doc.message & "\\n\\nKiln & Co. automation"}}',
         },
       },
     ],

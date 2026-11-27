@@ -24,6 +24,11 @@ export const DigestButton = () => {
         <div className="mt-4" data-testid="digest-result">
           <p className="text-sm font-semibold text-ink">Result of this run</p>
           <RunList runs={[state.run]} adminLinks />
+          <p className="mt-2 text-sm text-ink-soft" data-testid="digest-emailed">
+            {state.run.emailed
+              ? 'The digest was emailed to you.'
+              : 'The digest email was not sent.'}
+          </p>
         </div>
       )}
     </form>

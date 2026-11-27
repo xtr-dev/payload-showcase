@@ -3,11 +3,11 @@
 import { revalidatePath } from 'next/cache'
 
 import { getCurrentUser } from '@/lib/auth'
-import { runStudioDigest, type RunSummary } from '@/lib/automation'
+import { runStudioDigest, type StudioDigestRun } from '@/lib/automation'
 import { getPayloadClient } from '@/lib/payload'
 
 export interface DigestState {
-  run?: RunSummary
+  run?: StudioDigestRun
   error?: string
 }
 

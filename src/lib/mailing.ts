@@ -1,4 +1,4 @@
-import { sendEmail } from '@xtr-dev/payload-mailing'
+import { ImmediateProcessingError, sendEmail } from '@xtr-dev/payload-mailing'
 import type { Payload, Where } from 'payload'
 
 import type { Booking, Email, Session, User, Workshop } from '@/payload-types'
@@ -286,18 +286,30 @@ export const applyNewsletterChange = async (payload: Payload, user: User): Promi
     if (already.totalDocs === 0) await queueNewsletterFor(payload, user, upcomingAt)
   }
 
-  await sendEmail<Email>(payload, {
-    template: {
-      slug: TEMPLATES.newsletterSubscribed,
-      variables: {
-        ...baseVariables('You are on the list for the Kiln & Co. studio newsletter.'),
-        firstName: firstName(user),
-        nextIssue: upcomingAt?.toISOString() ?? '',
+  try {
+    await sendEmail<Email>(payload, {
+      template: {
+        slug: TEMPLATES.newsletterSubscribed,
+        variables: {
+          ...baseVariables('You are on the list for the Kiln & Co. studio newsletter.'),
+          firstName: firstName(user),
+          nextIssue: upcomingAt?.toISOString() ?? '',
+        },
       },
-    },
-    data: { to: [user.email], recipient: user.id },
-    processImmediately: true,
-  })
+      data: { to: [user.email], recipient: user.id },
+      processImmediately: true,
+    })
+  } catch (error) {
+    // The email was created and queued, only running its job inline failed: it goes out on a
+    // later queue run, so the opt-in itself has not failed. (A failed delivery attempt does not
+    // throw at all: the plugin puts the email back to pending and queues a retry after its
+    // retryDelay.)
+    if (!(error instanceof ImmediateProcessingError)) throw error
+    payload.logger.warn(
+      { err: error.cause, emailId: error.email.id },
+      'Newsletter confirmation could not be sent right away; it stays queued for a retry',
+    )
+  }
 }
 
 /** Opts a member in to or out of the newsletter. The users hook applies the side effects. */

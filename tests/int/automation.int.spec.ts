@@ -8,6 +8,7 @@ import {
   type PayloadRequest,
   type Where,
 } from 'payload'
+import { findStepResult } from '@xtr-dev/payload-automation/server'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getRecentRuns, runStudioDigest } from '@/lib/automation'
@@ -201,14 +202,14 @@ describe('Booking confirmed (collection hook)', () => {
     expect(runs).toHaveLength(1)
     const [run] = runs
     expect(run.status).toBe('completed')
-    expect(run.stepResults?.map((s) => [s.stepName, s.status])).toEqual([
-      ['Read session', 'succeeded'],
-      ['Read workshop', 'succeeded'],
-      ['Find confirmation email', 'succeeded'],
-      ['Find confirmation notification', 'succeeded'],
-      ['Find earlier tips', 'succeeded'],
-      ['Send what-to-bring tips', 'succeeded'],
-      ['Write studio log', 'succeeded'],
+    expect(run.stepResults?.map((s) => [s.slug, s.stepName, s.status])).toEqual([
+      ['read-session', 'Read session', 'succeeded'],
+      ['read-workshop', 'Read workshop', 'succeeded'],
+      ['find-confirmation-email', 'Find confirmation email', 'succeeded'],
+      ['find-confirmation-notification', 'Find confirmation notification', 'succeeded'],
+      ['find-earlier-tips', 'Find earlier tips', 'succeeded'],
+      ['send-tips', 'Send what-to-bring tips', 'succeeded'],
+      ['write-studio-log', 'Write studio log', 'succeeded'],
     ])
 
     // The workflow sends no email of its own: mailing's single confirmation is the only one.
@@ -216,7 +217,7 @@ describe('Booking confirmed (collection hook)', () => {
     expect(await confirmationEmails()).toBe(1)
     expect(await bookingNotifications({ event: { equals: 'booking-confirmed' } })).toBe(1)
 
-    // Later steps used the earlier steps' outputs (JSONata over steps.<name>.output).
+    // Later steps used the earlier steps' outputs (JSONata over steps.<slug>.output).
     const session = ctx.sessions.find((s) => s.id === relId(booking.session))!
     const workshop = ctx.workshops.find((w) => w.id === relId(session.workshop))!
     const { docs: tips } = await payload.find({
@@ -260,9 +261,7 @@ describe('Booking confirmed (collection hook)', () => {
     await payload.update({ collection: 'bookings', id: booking.id, data: { status: 'paid' } })
     const [run] = await runsOf(WORKFLOW_SLUGS.bookingConfirmed)
     expect(run.status).toBe('completed')
-    expect(run.stepResults?.find((s) => s.stepName === 'Send what-to-bring tips')?.status).toBe(
-      'skipped',
-    )
+    expect(findStepResult(run.stepResults, 'send-tips')?.status).toBe('skipped')
     expect((await latestLogEntry()).message).toContain('What-to-bring tips: already sent earlier.')
 
     expect(await confirmationEmails()).toBe(1)
@@ -384,12 +383,13 @@ describe('Studio digest (manual run)', () => {
     const summary = await runStudioDigest(payload, ctx.admin)
     expect(summary.status).toBe('completed')
     expect(summary.workflowSlug).toBe(WORKFLOW_SLUGS.studioDigest)
-    expect(summary.steps.map((s) => s.status)).toEqual([
-      'succeeded',
-      'succeeded',
-      'succeeded',
-      'succeeded',
+    expect(summary.steps.map((s) => [s.slug, s.status])).toEqual([
+      ['count-bookings', 'succeeded'],
+      ['count-log', 'succeeded'],
+      ['write-studio-log', 'succeeded'],
+      ['email-digest', 'succeeded'],
     ])
+    expect(summary.emailed).toBe(true)
 
     const entry = await latestLogEntry()
     expect(entry.source).toBe('manual')
@@ -463,7 +463,8 @@ describe('Studio digest failures', () => {
     const summary = await runStudioDigest(payload, ctx.admin)
     expect(summary.status).toBe('failed')
     expect(summary.workflowSlug).toBe(WORKFLOW_SLUGS.studioDigest)
-    expect(summary.steps.some((s) => s.status === 'failed')).toBe(true)
+    expect(summary.steps.find((s) => s.slug === 'email-digest')?.status).toBe('failed')
+    expect(summary.emailed).toBe(false)
     // It is this run, not an older one.
     expect(before.map((r) => r.id)).not.toContain(summary.id)
   })

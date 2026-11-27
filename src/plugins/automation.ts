@@ -12,13 +12,7 @@ import {
 import type { CollectionConfig, Endpoint, JobsConfig, Plugin } from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
-import {
-  AUTOMATION_QUEUE,
-  automationWorkflows,
-  DEV_WEBHOOK_SECRET,
-  MORNING_REPORT_TIMEZONE,
-  WORKFLOW_SLUGS,
-} from '@/seed/automation'
+import { AUTOMATION_QUEUE, automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
 
 /**
  * @xtr-dev/payload-automation
@@ -186,42 +180,6 @@ const automationJobs: Plugin = (config) => {
   }
 }
 
-/**
- * Sets the morning report's trigger timezone after the plugin has seeded it. Seeding in
- * payload-automation 0.3.0 copies a scheduled trigger's `schedule` but not its `timezone`, so the
- * seeded trigger would run at 07:00 server time. This runs after the plugin's own onInit (which
- * seeds) and only touches a trigger that has no timezone yet, so it is a no-op once the plugin
- * seeds the timezone itself, and it leaves a timezone changed in the admin panel alone.
- */
-const morningReportTimezonePlugin: Plugin = (config) => {
-  const incomingOnInit = config.onInit
-  return {
-    ...config,
-    onInit: async (payload) => {
-      await incomingOnInit?.(payload)
-      const { docs } = await payload.find({
-        collection: 'workflows',
-        where: { slug: { equals: WORKFLOW_SLUGS.morningReport } },
-        depth: 1,
-        limit: 1,
-        overrideAccess: true,
-        select: { triggers: true },
-      })
-      for (const trigger of docs[0]?.triggers ?? []) {
-        if (typeof trigger !== 'object' || trigger.type !== 'scheduled' || trigger.timezone) {
-          continue
-        }
-        await payload.update({
-          collection: 'automation-triggers',
-          id: trigger.id,
-          data: { timezone: MORNING_REPORT_TIMEZONE },
-          overrideAccess: true,
-        })
-      }
-    },
-  }
-}
-
 export const automation: Plugin[] = [
   studioLogPlugin,
   pagerUrlPlugin,
@@ -244,5 +202,4 @@ export const automation: Plugin[] = [
     scheduledTriggers: { tick: '* * * * *', queue: AUTOMATION_QUEUE },
   }),
   automationJobs,
-  morningReportTimezonePlugin,
 ]

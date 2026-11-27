@@ -1127,6 +1127,8 @@ export interface AutomationTrigger {
         | 'afterForgotPassword'
         | 'afterRefresh'
         | 'afterMe'
+        | 'refresh'
+        | 'me'
         | 'beforeOperation'
         | 'afterOperation'
         | 'afterError'
@@ -1299,6 +1301,10 @@ export interface WorkflowRun {
          * Reference to the step that was executed
          */
         step?: (number | null) | AutomationStep;
+        /**
+         * Slug of the step at execution time, as used in `steps.<slug>` expressions and dependencies. Empty on runs stored before this field existed; those are identified by step name.
+         */
+        slug?: string | null;
         /**
          * Name of the step at execution time
          */
@@ -2280,6 +2286,7 @@ export interface WorkflowRunsSelect<T extends boolean = true> {
     | T
     | {
         step?: T;
+        slug?: T;
         stepName?: T;
         stepIndex?: T;
         status?: T;
@@ -2663,7 +2670,7 @@ export interface TaskHttpRequestStep {
       | boolean
       | null;
     /**
-     * Request body data. Use JSONPath to reference values (e.g., {"postId": "$.trigger.doc.id", "title": "$.trigger.doc.title"})
+     * Request body data. Use whole-string JSONata templates to reference values (e.g., {"postId": "{{trigger.doc.id}}", "title": "{{trigger.doc.title}}"})
      */
     body?:
       | {
@@ -2767,7 +2774,7 @@ export interface TaskCreateDocument {
      */
     collectionSlug: string;
     /**
-     * The document data to create. Use JSONPath to reference trigger data (e.g., {"title": "$.trigger.doc.title", "author": "$.trigger.doc.author"})
+     * The document data to create. Use whole-string JSONata templates for dynamic values (e.g., {"title": "{{trigger.doc.title}}", "author": "{{trigger.doc.author}}"})
      */
     data:
       | {
@@ -2817,11 +2824,11 @@ export interface TaskReadDocument {
      */
     collectionSlug: string;
     /**
-     * The ID of a specific document to read. Use JSONPath (e.g., "$.trigger.doc.relatedId"). Leave empty to find multiple.
+     * The ID of a specific document to read. Use a whole-string JSONata template (e.g., "{{trigger.doc.relatedId}}"). Leave empty to find multiple.
      */
     id?: string | null;
     /**
-     * Query conditions to find documents when ID is not provided. Use JSONPath in values (e.g., {"category": "$.trigger.doc.category", "status": "published"})
+     * Query conditions to find documents when ID is not provided. Use whole-string JSONata templates in values (e.g., {"category": "{{trigger.doc.category}}", "status": "published"})
      */
     where?:
       | {
@@ -2879,11 +2886,11 @@ export interface TaskUpdateDocument {
      */
     collectionSlug: string;
     /**
-     * The ID of the document to update. Use JSONPath to reference IDs (e.g., "$.trigger.doc.id" or "$.steps.previousStep.output.id")
+     * The ID of the document to update. Use whole-string JSONata templates to reference IDs (e.g., "{{trigger.doc.id}}" or "{{steps.previousStep.output.id}}")
      */
     id: string;
     /**
-     * The data to update the document with. Use JSONPath to reference values (e.g., {"status": "$.trigger.doc.status", "updatedBy": "$.trigger.user.id"})
+     * The data to update the document with. Use whole-string JSONata templates to reference values (e.g., {"status": "{{trigger.doc.status}}"})
      */
     data:
       | {
@@ -2933,11 +2940,11 @@ export interface TaskDeleteDocument {
      */
     collectionSlug: string;
     /**
-     * The ID of a specific document to delete. Use JSONPath (e.g., "$.trigger.doc.id"). Leave empty to delete multiple.
+     * The ID of a specific document to delete. Use a whole-string JSONata template (e.g., "{{trigger.doc.id}}"). Leave empty to delete multiple.
      */
     id?: string | null;
     /**
-     * Query conditions to find documents to delete when ID is not provided. Use JSONPath in values (e.g., {"author": "$.trigger.doc.author"})
+     * Query conditions to find documents to delete when ID is not provided. Use whole-string JSONata templates in values (e.g., {"author": "{{trigger.doc.author}}"})
      */
     where?:
       | {
@@ -2975,23 +2982,23 @@ export interface TaskDeleteDocument {
 export interface TaskSendEmail {
   input: {
     /**
-     * Recipient email address. Use JSONPath for dynamic values (e.g., "$.trigger.doc.email" or "$.trigger.user.email")
+     * Recipient email address. Use a whole-string JSONata template for dynamic values (e.g., "{{trigger.doc.email}}")
      */
     to: string;
     /**
-     * Sender email address. Use JSONPath if needed (e.g., "$.trigger.doc.senderEmail"). Uses default if not provided.
+     * Sender email address. Use a whole-string JSONata template if needed (e.g., "{{trigger.doc.senderEmail}}"). Uses default if not provided.
      */
     from?: string | null;
     /**
-     * Email subject line. Can include JSONPath references (e.g., "Order #$.trigger.doc.orderNumber received")
+     * Email subject line. Use a whole-string JSONata template with & to concatenate dynamic content (e.g., "{{'Order #' & trigger.doc.orderNumber & ' received'}}")
      */
     subject: string;
     /**
-     * Plain text email content. Use JSONPath to include dynamic content (e.g., "Dear $.trigger.doc.customerName, your order #$.trigger.doc.id has been received.")
+     * Plain text email content. Use a whole-string JSONata template with & to concatenate dynamic content (e.g., "{{'Dear ' & trigger.doc.customerName & ', your order #' & trigger.doc.id & ' has been received.'}}")
      */
     text?: string | null;
     /**
-     * HTML email content. Use JSONPath for dynamic values (e.g., "<h1>Order #$.trigger.doc.orderNumber</h1>")
+     * HTML email content. Use a whole-string JSONata template with & to concatenate dynamic values (e.g., "{{'<h1>Order #' & trigger.doc.orderNumber & '</h1>'}}")
      */
     html?: string | null;
     /**

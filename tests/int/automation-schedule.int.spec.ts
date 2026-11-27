@@ -82,7 +82,7 @@ describe('wiring', () => {
     expect(workflow.readOnly).toBe(true)
     expect(trigger.type).toBe('scheduled')
     expect(trigger.schedule).toBe(MORNING_REPORT_SCHEDULE)
-    // Seeding in payload-automation 0.3.0 drops the timezone; src/plugins/automation.ts sets it.
+    // Seeded straight from the workflow definition's `parameters.timezone`.
     expect(trigger.timezone).toBe(MORNING_REPORT_TIMEZONE)
     // The plugin starts counting from the save, so nothing is backfilled.
     expect(trigger.lastFiredAt).toBeTruthy()
