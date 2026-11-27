@@ -4,6 +4,7 @@ import { Container } from '@/components/ui'
 
 import { AutomationShowcase } from './sections/Automation'
 import { BillingShowcase } from './sections/Billing'
+import { EcommerceShowcase } from './sections/Ecommerce'
 import { FeatureFlagsShowcase } from './sections/FeatureFlags'
 import { MailingShowcase } from './sections/Mailing'
 import { NotificationsShowcase } from './sections/Notifications'
@@ -19,6 +20,7 @@ const SECTIONS = [
   { id: 'notifications', label: 'Notifications', Component: NotificationsShowcase },
   { id: 'feature-flags', label: 'Feature flags', Component: FeatureFlagsShowcase },
   { id: 'automation', label: 'Automation', Component: AutomationShowcase },
+  { id: 'ecommerce', label: 'Shop', Component: EcommerceShowcase },
 ]
 
 export default function ShowcasePage() {
@@ -33,9 +35,9 @@ export default function ShowcasePage() {
             A real studio site, built from Payload plugins.
           </h1>
           <p className="mt-6 max-w-2xl text-lg text-paper/80">
-            Kiln &amp; Co. is a fictional pottery studio. Everything that isn’t pages and products
-            (payments, email, notifications, experiments and workflows) comes from an open-source
-            xtr-dev plugin for Payload CMS.
+            Kiln &amp; Co. is a fictional pottery studio. Everything that isn’t pages and classes
+            (payments, email, notifications, experiments, workflows and the shop) comes from an
+            open-source xtr-dev plugin for Payload CMS.
           </p>
           <nav aria-label="Plugins" className="mt-10">
             <ul className="flex flex-wrap gap-2">

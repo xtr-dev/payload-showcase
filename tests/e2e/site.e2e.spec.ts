@@ -119,7 +119,14 @@ test.describe('accounts', () => {
 test.describe('showcase', () => {
   test('has a section for every plugin', async ({ page }) => {
     await page.goto('/showcase')
-    for (const pkg of ['billing', 'mailing', 'notifications', 'feature-flags', 'automation']) {
+    for (const pkg of [
+      'billing',
+      'mailing',
+      'notifications',
+      'feature-flags',
+      'automation',
+      'ecommerce',
+    ]) {
       await expect(page.locator(`section[data-plugin="@xtr-dev/payload-${pkg}"]`)).toBeVisible()
     }
   })

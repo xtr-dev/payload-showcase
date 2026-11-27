@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 import { ProductCard } from '@/components/shop/ProductCard'
-import { Container, SectionHeading } from '@/components/ui'
+import { Alert, Container, SectionHeading } from '@/components/ui'
 import { isEnabled } from '@/lib/flags'
 import { formatPrice } from '@/lib/format'
 import { getPayloadClient } from '@/lib/payload'
@@ -28,6 +28,7 @@ const pill =
 /** Gated by the `shop` feature flag: returns 404 while the flag is off. */
 export default async function ShopPage({ searchParams }: { searchParams: SearchParams }) {
   if (!(await isEnabled('shop'))) notFound()
+  const promo = await isEnabled('shop-free-shipping-banner')
   const { category: categoryParam } = await searchParams
   const payload = await getPayloadClient()
   const categories = await getShopCategories(payload)
@@ -64,6 +65,14 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
       </section>
 
       <Container className="py-12 lg:py-16">
+        {promo && (
+          <div className="mb-8" data-testid="shop-promo">
+            <Alert tone="info" title="Free shipping this week">
+              Use the code <span className="font-mono font-semibold">FREESHIP</span> in your cart
+              and we’ll post any order for free.
+            </Alert>
+          </div>
+        )}
         <nav aria-label="Categories">
           <ul className="flex flex-wrap gap-2">
             <li>

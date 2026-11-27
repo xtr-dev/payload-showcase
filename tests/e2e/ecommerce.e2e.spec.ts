@@ -66,6 +66,7 @@ test.describe('Shop (payload-ecommerce)', () => {
       .getByRole('link', { name: 'Shop', exact: true })
       .click()
     await expect(page.getByRole('heading', { level: 1 })).toContainText('studio home')
+    await expect(page.getByTestId('shop-promo')).toContainText('FREESHIP')
 
     const products = page.getByTestId('product')
     await expect(products).toHaveCount(6)
@@ -204,7 +205,10 @@ test.describe('Shop (payload-ecommerce)', () => {
     await stranger.context().close()
   })
 
-  test('a member’s order shows up in their account, with its invoice', async ({ page }) => {
+  test('a member’s order shows up in their account, is confirmed by email and ships', async ({
+    page,
+    browser,
+  }) => {
     await registerMember(page, 'Noor Winkel')
     await page.goto('/shop/breakfast-bowl')
     await addToCart(page, { quantity: 3 })
@@ -238,6 +242,47 @@ test.describe('Shop (payload-ecommerce)', () => {
     await orders.getByRole('link').click()
     await page.waitForURL(`**/shop/orders/${number}`)
     await expect(page.getByTestId('order-result')).toContainText('Paid')
+
+    // payload-mailing: the confirmation arrives in the demo mailbox (the mail queue runs every
+    // five seconds), with a link back to the order.
+    await expect(async () => {
+      await page.goto('/mailbox')
+      await expect(
+        page
+          .getByRole('list', { name: 'Captured emails' })
+          .getByRole('link', { name: `Your Kiln & Co. order ${number}` }),
+      ).toBeVisible({ timeout: 1000 })
+    }).toPass({ timeout: 30_000 })
+    await page.getByRole('link', { name: `Your Kiln & Co. order ${number}` }).click()
+    const email = page.frameLocator('iframe[title^="Email:"]')
+    await expect(email.getByText('Thank you, Guus')).toBeVisible()
+    await expect(email.getByText('Items: 3 × Breakfast bowl')).toBeVisible()
+    await expect(email.getByRole('link', { name: 'Follow your order' })).toHaveAttribute(
+      'href',
+      new RegExp(`/shop/orders/${number}\\?t=[0-9a-f]{40}$`),
+    )
+
+    // payload-notifications: an admin ships the order and the member hears about it.
+    const admin = await (await browser.newContext()).newPage()
+    await signInAsAdmin(admin)
+    const found = await admin.request.get(
+      `/api/orders?where[orderNumber][equals]=${number}&depth=0`,
+    )
+    const { docs } = (await found.json()) as { docs: Array<{ id: number }> }
+    const shipped = await admin.request.patch(`/api/orders/${docs[0].id}`, {
+      data: { status: 'shipped', trackingNumber: '3SKILN0042' },
+    })
+    expect(shipped.ok()).toBe(true)
+    await admin.context().close()
+
+    await page.goto('/account')
+    await expect(page.getByRole('region', { name: /^Notifications/ })).toContainText(
+      'Your order has shipped',
+    )
+    await expect(page.getByTestId('orders')).toContainText('Shipped')
+    await page.goto(`/shop/orders/${number}`)
+    await expect(page.getByTestId('order-heading')).toHaveText('Your order is on its way')
+    await expect(page.getByTestId('order-result')).toContainText('3SKILN0042')
   })
 
   test('a declined payment cancels the order and the items can go back in the cart', async ({
@@ -298,6 +343,17 @@ test.describe('Shop (payload-ecommerce)', () => {
     await page.reload()
     await expect(page.getByTestId('order-heading')).toHaveText('This order was refunded')
     await expect(page.getByTestId('order-result')).toContainText('Refunded')
+  })
+
+  test('shows the Shop showcase section live', async ({ page }) => {
+    await page.goto('/showcase#ecommerce')
+    const section = page.locator('#ecommerce')
+    await expect(section.getByText('Live', { exact: true })).toBeVisible()
+    const demo = section.getByTestId('ecommerce-showcase')
+    await expect(demo).toContainText('From cart to doorstep')
+    await expect(demo).toContainText('Products for sale')
+    await section.getByRole('link', { name: 'Visit the shop' }).click()
+    await page.waitForURL('**/shop')
   })
 
   test('the shop disappears while its flag is off', async ({ page, playwright, baseURL }) => {

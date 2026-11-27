@@ -20,12 +20,19 @@ export type FlagName =
   | 'new-booking-flow'
   /** Gates the studio shop (/shop and everything under it) and its navigation link. */
   | 'shop'
+  /** Shows the "free shipping with FREESHIP" promo banner on /shop. */
+  | 'shop-free-shipping-banner'
 
 export type ExperimentName = 'home-hero'
 
 export type Variant = 'a' | 'b'
 
-export const FLAG_NAMES: FlagName[] = ['gift-cards', 'new-booking-flow', 'shop']
+export const FLAG_NAMES: FlagName[] = [
+  'gift-cards',
+  'new-booking-flow',
+  'shop',
+  'shop-free-shipping-banner',
+]
 export const EXPERIMENT_NAMES: ExperimentName[] = ['home-hero']
 export const VARIANTS: Variant[] = ['a', 'b']
 

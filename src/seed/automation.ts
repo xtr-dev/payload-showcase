@@ -38,6 +38,8 @@ export const WORKFLOW_SLUGS = {
   openingHours: 'opening-hours-changed',
   studioDigest: 'studio-digest',
   morningReport: 'morning-kiln-room-report',
+  orderPaid: 'shop-order-paid',
+  releaseUnpaidOrders: 'release-unpaid-orders',
 } as const
 
 /** Slug of the studio digest's email step, whose result src/lib/automation.ts reads. */
@@ -54,6 +56,21 @@ export const MORNING_REPORT_SCHEDULE = '0 7 * * *'
 
 /** The studio's timezone, which the morning report's schedule is evaluated in. */
 export const MORNING_REPORT_TIMEZONE = STUDIO_TIME_ZONE
+
+/**
+ * When unpaid shop orders are looked for: every 15 minutes. An order is released once it has
+ * waited UNPAID_ORDER_MINUTES, so between 30 and 45 minutes after it was placed.
+ */
+export const RELEASE_UNPAID_ORDERS_SCHEDULE = '*/15 * * * *'
+
+/** How long a shop order may wait for its payment (STALE_ORDER_MINUTES in src/lib/shop.ts). */
+export const UNPAID_ORDER_MINUTES = 30
+
+/**
+ * Slug of the custom step that cancels unpaid orders (CancelStaleOrdersStepTask in
+ * src/plugins/ecommerce.ts, which the plugin config registers).
+ */
+const CANCEL_STALE_ORDERS_STEP = 'cancel-stale-orders'
 
 /** Retry settings of one seeded step, as stored on its `automation-steps` document. */
 export interface StepRetry {
@@ -96,6 +113,20 @@ const relIdExpr = (path: string) => `($type(${path}) = "object" ? ${path}.id : $
 /** JSONata formatting the date-time at `path` as "Sat 12 Dec, 10:00" in studio winter time (CET). */
 const studioDateExpr = (path: string) =>
   `$fromMillis($toMillis(${path}), "[FNn,*-3] [D] [MNn,*-3], [H01]:[m01]", "+0100")`
+
+/**
+ * JSONata for how many units of a product (the context item) are left: the scarcest glaze for a
+ * product with variants, which keep their own stock, and the product's own quantity otherwise.
+ */
+const STOCK_LEFT_EXPR = '($count(variants) > 0 ? $min(variants.inventory) : inventory.quantity)'
+
+/**
+ * JSONata for the products of the paid order that are at or under their low-stock threshold.
+ * A product without a threshold (or with 0) never counts as low.
+ */
+const LOW_STOCK_EXPR =
+  'steps.`read-products`.output.docs[inventory.trackQuantity = true and ' +
+  `${STOCK_LEFT_EXPR} <= (inventory.lowStockThreshold ? inventory.lowStockThreshold : -1)]`
 
 export interface AutomationWorkflowOptions {
   /** Shared secret for the kiln alert webhook. Only its SHA-256 hash is stored. */
@@ -493,6 +524,129 @@ export const automationWorkflows = ({
           to: '{{$join(steps.`find-admins`.output.docs.email, ", ")}}',
           subject: '{{steps.`write-studio-log`.output.doc.title}}',
           text: '{{steps.`write-studio-log`.output.doc.message & "\\n\\nKiln & Co. automation"}}',
+        },
+      },
+    ],
+  },
+  {
+    slug: WORKFLOW_SLUGS.orderPaid,
+    name: 'Shop order paid',
+    description:
+      'When a shop order is paid, billing has marked it paid and mailing has queued the ' +
+      'confirmation email. This workflow looks at the stock that is left: it records the sale ' +
+      'in the studio log and, when a product in the order is down to its low-stock threshold, ' +
+      'tells the studio admin in their inbox.',
+    triggers: [
+      {
+        type: 'collection-hook',
+        parameters: { collectionSlug: 'orders', hook: 'afterChange' },
+        // Only the change into "paid", so shipping or refunding the order later does not run it.
+        condition:
+          'trigger.operation = "update" and trigger.doc.paymentStatus = "paid" and trigger.previousDoc.paymentStatus != "paid"',
+      },
+    ],
+    steps: [
+      {
+        // The array constructor keeps a one-line order's single id an array for `in`.
+        name: 'Read ordered products',
+        slug: 'read-products',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'products',
+          where: { id: { in: `{{[trigger.doc.items.${relIdExpr('product')}]}}` } },
+          limit: 50,
+          depth: 0,
+        },
+      },
+      {
+        name: 'Find studio admin',
+        slug: 'find-admin',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'users',
+          where: { role: { equals: 'admin' } },
+          limit: 1,
+          depth: 0,
+        },
+      },
+      {
+        name: 'Write studio log',
+        slug: 'write-studio-log',
+        type: 'create-document',
+        dependencies: ['read-products'],
+        input: {
+          collectionSlug: 'studio-log',
+          data: {
+            title:
+              '{{"Shop order paid: " & $string($sum(trigger.doc.items.quantity)) & ' +
+              '($sum(trigger.doc.items.quantity) = 1 ? " piece" : " pieces")}}',
+            // Public text: what was sold and what is running low, never who bought it.
+            message:
+              '{{"Sold: " & $join(steps.`read-products`.output.docs.title, ", ") & ". Low on stock now: " & ' +
+              `($count(${LOW_STOCK_EXPR}) > 0 ? $join(${LOW_STOCK_EXPR}.title, ", ") : "nothing") & "."}}`,
+            source: 'order',
+            severity: `{{$count(${LOW_STOCK_EXPR}) > 0 ? "warning" : "info"}}`,
+          },
+        },
+      },
+      {
+        name: 'Warn admin about low stock',
+        slug: 'warn-low-stock',
+        type: 'create-document',
+        dependencies: ['read-products', 'find-admin'],
+        condition: `$count(${LOW_STOCK_EXPR}) > 0 and steps.\`find-admin\`.output.totalDocs > 0`,
+        input: {
+          collectionSlug: 'notifications',
+          data: {
+            title: 'Low stock in the shop',
+            message: richText(
+              `{{"After order " & trigger.doc.orderNumber & ": " & $join(${LOW_STOCK_EXPR}.(title & " (" & $string(${STOCK_LEFT_EXPR}) & " left)"), ", ") & "."}}`,
+            ),
+            channel: 'orders',
+            recipient: '{{steps.`find-admin`.output.doc.id}}',
+            order: '{{trigger.doc.id}}',
+          },
+        },
+      },
+    ],
+  },
+  {
+    slug: WORKFLOW_SLUGS.releaseUnpaidOrders,
+    name: 'Release unpaid orders',
+    description:
+      'A shop order holds its stock from the moment it is placed. Every 15 minutes a scheduled ' +
+      `trigger runs a custom step that cancels orders left unpaid for ${UNPAID_ORDER_MINUTES} ` +
+      'minutes; the ecommerce plugin then puts their items back on the shelf. The studio log ' +
+      'gets an entry when something was released.',
+    triggers: [
+      {
+        type: 'scheduled',
+        parameters: { schedule: RELEASE_UNPAID_ORDERS_SCHEDULE, timezone: STUDIO_TIME_ZONE },
+      },
+    ],
+    steps: [
+      {
+        name: 'Cancel unpaid orders',
+        slug: 'cancel-unpaid-orders',
+        type: CANCEL_STALE_ORDERS_STEP,
+        input: { olderThanMinutes: UNPAID_ORDER_MINUTES },
+      },
+      {
+        name: 'Write studio log',
+        slug: 'write-studio-log',
+        type: 'create-document',
+        dependencies: ['cancel-unpaid-orders'],
+        condition: 'steps.`cancel-unpaid-orders`.output.cancelled > 0',
+        input: {
+          collectionSlug: 'studio-log',
+          data: {
+            title:
+              '{{"Released " & $string(steps.`cancel-unpaid-orders`.output.cancelled) & ' +
+              '(steps.`cancel-unpaid-orders`.output.cancelled = 1 ? " unpaid order" : " unpaid orders")}}',
+            message: `Unpaid for more than ${UNPAID_ORDER_MINUTES} minutes, so the items are back on the shelf.`,
+            source: 'order',
+            severity: 'info',
+          },
         },
       },
     ],

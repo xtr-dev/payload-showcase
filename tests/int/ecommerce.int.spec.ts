@@ -1,11 +1,16 @@
+import { runScheduledTriggers } from '@xtr-dev/payload-automation/server'
 import { useEcommerce as ecommerceHelpers } from '@xtr-dev/payload-ecommerce'
+import { Cron } from 'croner'
 import { randomUUID } from 'crypto'
 import { createLocalReq, type Endpoint, type Payload, type PayloadRequest } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { FLAGS_SLUG } from '@/lib/experiments'
+import { MAIL_QUEUES, TEMPLATES } from '@/lib/mailing'
+import { MAIL_OUTBOX_SLUG } from '@/lib/mailOutbox'
 import {
   addToCart,
+  cancelStaleOrders,
   FREE_SHIPPING_FROM,
   getCartCount,
   getCartView,
@@ -21,11 +26,13 @@ import {
   setCartLineQuantity,
   SHIPPING_FLAT,
   shippingFor,
+  STALE_ORDER_MINUTES,
   ShopError,
   toCartSession,
 } from '@/lib/shop'
 import type { Invoice, Order, Payment, Product, User } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
+import { RELEASE_UNPAID_ORDERS_SCHEDULE, WORKFLOW_SLUGS } from '@/seed/automation'
 import { CATEGORY_SEEDS, COUPON_SEEDS, PRODUCT_SEEDS } from '@/seed/ecommerce'
 
 import { getTestPayload, type TestPayload } from '../helpers/payload'
@@ -697,6 +704,319 @@ describe('Shop (payload-ecommerce)', () => {
       expect(
         (await refund(await request({ user: ctx.admin, routeParams: { id: '999999' } }))).status,
       ).toBe(404)
+    })
+  })
+
+  describe('tie-ins', () => {
+    const MINUTE = 60_000
+
+    /** A paid order of one product, placed by `user` or by a guest. */
+    const paidOrder = async (title: string, user?: User, variant?: string): Promise<Order> => {
+      const session = randomUUID()
+      await addToCart(payload, session, {
+        productId: (await product(title)).id,
+        variant,
+        quantity: 1,
+      })
+      const { order } = await placeOrder(payload, session, user ?? null, {
+        ...DELIVERY,
+        email: 'guus@kiln.test',
+      })
+      await settle(await paymentOf(order), 'instant-success')
+      return reload(order)
+    }
+
+    const confirmationsFor = async (order: Order) =>
+      (
+        await payload.find({
+          collection: 'emails',
+          where: {
+            order: { equals: order.id },
+            templateSlug: { equals: TEMPLATES.orderConfirmation },
+          },
+          depth: 0,
+        })
+      ).docs
+
+    const runsOf = async (slug: string) =>
+      (
+        await payload.find({
+          collection: 'workflow-runs',
+          where: { 'workflow.slug': { equals: slug } },
+          sort: '-createdAt',
+          depth: 0,
+          limit: 100,
+        })
+      ).docs
+
+    const orderNotifications = async (order: Order, event?: string) =>
+      (
+        await payload.find({
+          collection: 'notifications',
+          where: {
+            and: [
+              { order: { equals: order.id } },
+              ...(event ? [{ event: { equals: event } }] : [{ event: { exists: false } }]),
+            ],
+          },
+          depth: 0,
+        })
+      ).docs
+
+    it('emails the confirmation once when an order is paid, to guests too', async () => {
+      const session = randomUUID()
+      await addToCart(payload, session, {
+        productId: (await product('Breakfast bowl')).id,
+        quantity: 2,
+      })
+      const { order } = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'confirm-me@kiln.test',
+        couponCode: 'WELCOME10',
+      })
+      // Nothing is sent while the order waits for its payment.
+      expect(await confirmationsFor(order)).toHaveLength(0)
+
+      await settle(await paymentOf(order), 'instant-success')
+      const [email, ...more] = await confirmationsFor(order)
+      expect(more).toHaveLength(0)
+      expect(email).toMatchObject({ to: ['confirm-me@kiln.test'], priority: 1 })
+      expect(email.subject).toBe(`Your Kiln & Co. order ${order.orderNumber}`)
+      expect(email.recipient ?? null).toBeNull()
+
+      await payload.jobs.run({ queue: MAIL_QUEUES.priority, limit: 100 })
+      const { docs: delivered } = await payload.find({
+        collection: MAIL_OUTBOX_SLUG,
+        where: { to: { equals: 'confirm-me@kiln.test' } },
+      })
+      expect(delivered).toHaveLength(1)
+      const html = delivered[0].html ?? ''
+      expect(html).toContain('Thank you, Guus')
+      expect(html).toContain('2 × Breakfast bowl')
+      // 2 × €34 − 10% + €6.95 shipping.
+      expect(html).toContain('€68.15')
+      expect(html).toContain('€6.80 discount')
+      expect(html).toContain('Guus Gast, Strandweg 12, 2042 AA Zandvoort')
+      // The link lets a guest back in: it carries the order's token.
+      expect(html).toContain(orderPath(payload, order).replace('&', '&amp;'))
+
+      // Later changes to the order never send it again.
+      await payload.update({ collection: 'orders', id: order.id, data: { status: 'shipped' } })
+      await payload.update({ collection: 'orders', id: order.id, data: { paymentStatus: 'paid' } })
+      expect(await confirmationsFor(order)).toHaveLength(1)
+    })
+
+    it('tells a member once when their order ships, and guests nothing', async () => {
+      const order = await paidOrder('Breakfast bowl', jonas)
+      expect((await confirmationsFor(order))[0]).toMatchObject({ to: [jonas.email] })
+      expect(await orderNotifications(order, 'order-shipped')).toHaveLength(0)
+
+      const ship = (status: Order['status']) =>
+        payload.update({
+          collection: 'orders',
+          id: order.id,
+          data: { status, trackingNumber: '3SKILN0042' },
+        })
+      await ship('shipped')
+      await ship('delivered')
+      await ship('shipped')
+      const [shipped, ...more] = await orderNotifications(order, 'order-shipped')
+      expect(more).toHaveLength(0)
+      expect(shipped).toMatchObject({
+        title: 'Your order has shipped',
+        channel: 'orders',
+        audience: 'user',
+        recipient: jonas.id,
+      })
+      expect(JSON.stringify(shipped.message)).toContain(order.orderNumber)
+      expect(JSON.stringify(shipped.message)).toContain('3SKILN0042')
+
+      // Jonas sees it in his inbox; Mara does not.
+      const inbox = (user: User) =>
+        payload.find({
+          collection: 'notifications',
+          where: { order: { equals: order.id }, event: { equals: 'order-shipped' } },
+          user,
+          overrideAccess: false,
+        })
+      expect((await inbox(jonas)).totalDocs).toBe(1)
+      expect((await inbox(mara)).totalDocs).toBe(0)
+
+      const guestOrder = await paidOrder('Breakfast bowl')
+      await payload.update({ collection: 'orders', id: guestOrder.id, data: { status: 'shipped' } })
+      expect(await orderNotifications(guestOrder, 'order-shipped')).toHaveLength(0)
+    })
+
+    it('runs the "Shop order paid" workflow: a log entry, and a low-stock warning for the admin', async () => {
+      const before = (await runsOf(WORKFLOW_SLUGS.orderPaid)).length
+      // Clay is under its threshold (4 left of 5) and gets lower with this order.
+      const order = await paidOrder('Stoneware clay 5 kg', mara)
+      const left = (await product('Stoneware clay 5 kg')).inventory!.quantity!
+
+      const runs = await runsOf(WORKFLOW_SLUGS.orderPaid)
+      expect(runs).toHaveLength(before + 1)
+      expect(runs[0].status).toBe('completed')
+      expect(runs[0].stepResults?.map((step) => step.status)).toEqual(Array(4).fill('succeeded'))
+
+      const { docs: log } = await payload.find({
+        collection: 'studio-log',
+        where: { source: { equals: 'order' } },
+        sort: '-createdAt',
+        limit: 1,
+        overrideAccess: false,
+      })
+      expect(log[0]).toMatchObject({
+        title: 'Shop order paid: 1 piece',
+        message: 'Sold: Stoneware clay 5 kg. Low on stock now: Stoneware clay 5 kg.',
+        severity: 'warning',
+      })
+      // The log is public: it never says who bought.
+      expect(JSON.stringify(log[0])).not.toContain(order.orderNumber)
+
+      const [warning, ...more] = await orderNotifications(order)
+      expect(more).toHaveLength(0)
+      expect(warning).toMatchObject({
+        title: 'Low stock in the shop',
+        channel: 'orders',
+        recipient: ctx.admin.id,
+      })
+      expect(JSON.stringify(warning.message)).toContain(
+        `After order ${order.orderNumber}: Stoneware clay 5 kg (${left} left).`,
+      )
+
+      // Plenty of bowls: a log entry, no warning. Shipping the order later runs nothing.
+      const calm = await paidOrder('Breakfast bowl', mara)
+      expect(await orderNotifications(calm)).toHaveLength(0)
+      const latest = (await runsOf(WORKFLOW_SLUGS.orderPaid))[0]
+      expect(latest.stepResults?.map((step) => step.status)).toEqual([
+        'succeeded',
+        'succeeded',
+        'succeeded',
+        'skipped',
+      ])
+      await payload.update({ collection: 'orders', id: calm.id, data: { status: 'shipped' } })
+      expect(await runsOf(WORKFLOW_SLUGS.orderPaid)).toHaveLength(before + 2)
+    })
+
+    it('releases orders left unpaid, restocks them and voids what was open', async () => {
+      // Earlier tests left unpaid orders behind; release those first so the numbers below are
+      // only about this order.
+      await cancelStaleOrders(payload, { now: new Date(Date.now() + 60 * MINUTE) })
+
+      const session = randomUUID()
+      const tools = await product('Trimming tool set')
+      const stock = tools.inventory!.quantity!
+      await addToCart(payload, session, { productId: tools.id, quantity: 3 })
+      const { order } = await placeOrder(payload, session, mara, DELIVERY)
+      const payment = await paymentOf(order)
+      expect((await product('Trimming tool set')).inventory?.quantity).toBe(stock - 3)
+
+      // Not yet: the order is younger than the limit.
+      const soon = new Date(Date.now() + (STALE_ORDER_MINUTES - 1) * MINUTE)
+      expect(await cancelStaleOrders(payload, { now: soon })).not.toContain(order.orderNumber)
+      expect((await reload(order)).status).toBe('pending')
+
+      const later = new Date(Date.now() + (STALE_ORDER_MINUTES + 1) * MINUTE)
+      expect(await cancelStaleOrders(payload, { now: later })).toContain(order.orderNumber)
+      expect(await reload(order)).toMatchObject({ status: 'cancelled' })
+      expect((await product('Trimming tool set')).inventory?.quantity).toBe(stock)
+      const cancelled = await payload.findByID({ collection: 'payments', id: payment.id, depth: 1 })
+      expect(cancelled.status).toBe('canceled')
+      expect((cancelled.invoice as Invoice).status).toBe('void')
+      expect(await confirmationsFor(order)).toHaveLength(0)
+      // Running it again finds nothing.
+      expect(await cancelStaleOrders(payload, { now: later })).toEqual([])
+
+      // Money that still arrives for the cancelled order goes straight back.
+      await payload.update({
+        collection: 'payments',
+        id: payment.id,
+        data: { status: 'succeeded' },
+      })
+      expect((await payload.findByID({ collection: 'payments', id: payment.id })).status).toBe(
+        'refunded',
+      )
+      expect(await reload(order)).toMatchObject({ status: 'cancelled' })
+      expect((await product('Trimming tool set')).inventory?.quantity).toBe(stock)
+      expect(await confirmationsFor(order)).toHaveLength(0)
+    })
+
+    it('fires "Release unpaid orders" on its schedule through the custom step', async () => {
+      const { docs } = await payload.find({
+        collection: 'workflows',
+        where: { slug: { equals: WORKFLOW_SLUGS.releaseUnpaidOrders } },
+        depth: 1,
+      })
+      const trigger = docs[0].triggers![0] as { schedule: string; lastFiredAt: string }
+      expect(trigger.schedule).toBe(RELEASE_UNPAID_ORDERS_SCHEDULE)
+      expect(payload.config.jobs.tasks?.map((task) => task.slug)).toContain('cancel-stale-orders')
+
+      const session = randomUUID()
+      await addToCart(payload, session, {
+        productId: (await product('Breakfast bowl')).id,
+        quantity: 1,
+      })
+      const { order } = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'slow@kiln.test',
+      })
+
+      // Make the order look old instead of moving the clock: the step uses the real time.
+      await payload.db.updateOne({
+        collection: 'orders',
+        id: order.id,
+        data: {
+          createdAt: new Date(Date.now() - (STALE_ORDER_MINUTES + 5) * MINUTE).toISOString(),
+        },
+      })
+      const occurrence = new Cron(trigger.schedule).nextRun(new Date(trigger.lastFiredAt))!
+      const results = await runScheduledTriggers(payload, {
+        now: new Date(occurrence.getTime() + MINUTE / 2),
+      })
+      expect(
+        results.filter((r) => String(r.workflowId) === String(docs[0].id)).map((r) => r.status),
+      ).toEqual(['triggered'])
+
+      const [run] = await runsOf(WORKFLOW_SLUGS.releaseUnpaidOrders)
+      expect(run.status).toBe('completed')
+      expect(run.stepResults?.map((step) => step.status)).toEqual(['succeeded', 'succeeded'])
+      expect((await reload(order)).status).toBe('cancelled')
+      const { docs: log } = await payload.find({
+        collection: 'studio-log',
+        where: { title: { like: 'Released' } },
+        sort: '-createdAt',
+        limit: 1,
+      })
+      expect(log[0]).toMatchObject({ title: 'Released 1 unpaid order', source: 'order' })
+    })
+
+    it('shows the free-shipping banner only while its flag is on', async () => {
+      const { default: ShopPage } = await import('@/app/(frontend)/shop/page')
+      /** Whether the page's element tree holds an element with this test id. */
+      const renders = async (testId: string): Promise<boolean> => {
+        const seen = new Set<unknown>()
+        const walk = (node: unknown): boolean => {
+          if (!node || typeof node !== 'object' || seen.has(node)) return false
+          seen.add(node)
+          if (Array.isArray(node)) return node.some(walk)
+          const props = (node as { props?: Record<string, unknown> }).props
+          return !!props && (props['data-testid'] === testId || walk(props.children))
+        }
+        return walk(await ShopPage({ searchParams: Promise.resolve({}) }))
+      }
+      expect(await renders('shop-promo')).toBe(true)
+
+      const flag = await payload.find({
+        collection: FLAGS_SLUG,
+        where: { name: { equals: 'shop-free-shipping-banner' } },
+      })
+      await payload.update({
+        collection: FLAGS_SLUG,
+        id: flag.docs[0].id,
+        data: { enabled: false },
+      })
+      expect(await renders('shop-promo')).toBe(false)
+      await payload.update({ collection: FLAGS_SLUG, id: flag.docs[0].id, data: { enabled: true } })
     })
   })
 

@@ -51,6 +51,7 @@ export const AutomationShowcase = async () => {
         'Manual run from server code, behind an admin-only button',
         'Read, create, send-email and HTTP request steps, with dependencies, step conditions and step outputs',
         'Step retries: the pager call is tried up to three times before the alert run fails',
+        'A custom step: the shop’s own task that releases unpaid orders, run every 15 minutes',
         'Run history with every step’s result, here and in the admin panel',
       ]}
       usedOn={[
@@ -64,7 +65,7 @@ export const AutomationShowcase = async () => {
       <div className="space-y-6">
         <Card as="section" className="p-6" aria-labelledby="automation-workflows-heading">
           <h3 id="automation-workflows-heading" className="text-2xl text-ink">
-            Five workflows, seeded from code
+            Seven workflows, seeded from code
           </h3>
           <p className="mt-2 text-sm text-ink-soft">
             Defined in <code className="font-mono">src/seed/automation.ts</code> and created by the
