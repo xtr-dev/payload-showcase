@@ -155,6 +155,7 @@ export interface Config {
       'update-document': TaskUpdateDocument;
       'delete-document': TaskDeleteDocument;
       'send-email': TaskSendEmail;
+      'automation-scheduled-triggers': TaskAutomationScheduledTriggers;
       inline: {
         input: unknown;
         output: unknown;
@@ -893,7 +894,8 @@ export interface PayloadJob {
           | 'read-document'
           | 'update-document'
           | 'delete-document'
-          | 'send-email';
+          | 'send-email'
+          | 'automation-scheduled-triggers';
         taskID: string;
         input?:
           | {
@@ -938,6 +940,7 @@ export interface PayloadJob {
         | 'update-document'
         | 'delete-document'
         | 'send-email'
+        | 'automation-scheduled-triggers'
       )
     | null;
   queue?: string | null;
@@ -1134,9 +1137,17 @@ export interface AutomationTrigger {
    */
   globalSlug?: 'site-settings' | null;
   /**
-   * Cron expression (e.g., "0 9 * * *" for 9 AM daily)
+   * Cron expression (e.g., "0 9 * * *" for 9 AM daily; an optional leading seconds field is supported). Fired by the plugin's scheduled job task, which needs a running Payload job runner.
    */
   schedule?: string | null;
+  /**
+   * IANA timezone the schedule is evaluated in (e.g., "Europe/Amsterdam"). Leave empty to use the server's timezone.
+   */
+  timezone?: string | null;
+  /**
+   * When the scheduler last fired this trigger. Set to the save time when the schedule is created or changed, so only occurrences after that fire.
+   */
+  lastFiredAt?: string | null;
   /**
    * Single path segment for this webhook. The endpoint is served at POST /api/automation/webhooks/<path>
    */
@@ -1636,7 +1647,7 @@ export interface StudioLog {
    * Public text: keep member names, emails and references out of it.
    */
   message?: string | null;
-  source: 'booking' | 'webhook' | 'settings' | 'manual';
+  source: 'booking' | 'webhook' | 'settings' | 'manual' | 'schedule';
   severity: 'info' | 'warning';
   /**
    * The booking this entry is about, if any.
@@ -2186,6 +2197,8 @@ export interface AutomationTriggersSelect<T extends boolean = true> {
   hook?: T;
   globalSlug?: T;
   schedule?: T;
+  timezone?: T;
+  lastFiredAt?: T;
   webhookPath?: T;
   webhookSecret?: T;
   webhookSecretHash?: T;
@@ -2999,6 +3012,16 @@ export interface TaskSendEmail {
      * Response from the mail server
      */
     response?: string | null;
+  };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskAutomation-scheduled-triggers".
+ */
+export interface TaskAutomationScheduledTriggers {
+  input?: unknown;
+  output: {
+    workflowRuns?: number | null;
   };
 }
 /**

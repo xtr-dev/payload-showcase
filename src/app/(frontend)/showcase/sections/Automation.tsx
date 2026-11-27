@@ -3,13 +3,14 @@ import Link from 'next/link'
 import { Alert, Badge, Card } from '@/components/ui'
 import { isAdminUser } from '@/access'
 import { getCurrentUser } from '@/lib/auth'
-import { getRecentRuns, getStudioLog } from '@/lib/automation'
+import { getRecentRuns, getScheduleStatus, getStudioLog } from '@/lib/automation'
 import { formatDate, formatTime } from '@/lib/format'
 import { getPayloadClient } from '@/lib/payload'
 import {
   automationWorkflows,
   KILN_ALERT_THRESHOLD_C,
   KILN_ALERT_WEBHOOK_PATH,
+  WORKFLOW_SLUGS,
 } from '@/seed/automation'
 
 import { ShowcaseSection } from '../ShowcaseSection'
@@ -29,9 +30,10 @@ const CURL_EXAMPLE = `curl -X POST http://localhost:3000/api/automation/webhooks
 export const AutomationShowcase = async () => {
   const [payload, user] = await Promise.all([getPayloadClient(), getCurrentUser()])
   const isAdmin = isAdminUser(user)
-  const [runs, log] = await Promise.all([
+  const [runs, log, morningReport] = await Promise.all([
     getRecentRuns(payload, { limit: 5, includeErrors: isAdmin }),
     getStudioLog(payload, 5),
+    getScheduleStatus(payload, WORKFLOW_SLUGS.morningReport),
   ])
 
   return (
@@ -39,12 +41,13 @@ export const AutomationShowcase = async () => {
       id="automation"
       pkg="@xtr-dev/payload-automation"
       title="Workflows that run themselves"
-      intro="Studio routines as code-defined workflows that build on the other plugins: a confirmed booking gets a what-to-bring note in the member’s inbox and a studio log entry, and a hot kiln pages the technician and posts studio news."
+      intro="Studio routines as code-defined workflows that build on the other plugins: a confirmed booking gets a what-to-bring note in the member’s inbox and a studio log entry, a hot kiln pages the technician and posts studio news, and every morning a report on the day ahead lands in the studio log."
       features={[
         'Collection-hook trigger with a JSONata condition: a booking moving to paid',
         'Works with mailing and notifications: checks their confirmation email and inbox message, adds tips without duplicating either',
         'Webhook trigger behind a hashed secret: kiln alerts that page the technician and broadcast studio news',
         'Global-hook trigger: opening hours changed in Site settings',
+        'Scheduled (cron) trigger in the studio’s timezone: a morning report at 07:00, fired by Payload’s job scheduler',
         'Manual run from server code, behind an admin-only button',
         'Read, create, send-email and HTTP request steps, with dependencies, step conditions and step outputs',
         'Run history with every step’s result, here and in the admin panel',
@@ -60,7 +63,7 @@ export const AutomationShowcase = async () => {
       <div className="space-y-6">
         <Card as="section" className="p-6" aria-labelledby="automation-workflows-heading">
           <h3 id="automation-workflows-heading" className="text-2xl text-ink">
-            Four workflows, seeded from code
+            Five workflows, seeded from code
           </h3>
           <p className="mt-2 text-sm text-ink-soft">
             Defined in <code className="font-mono">src/seed/automation.ts</code> and created by the
@@ -68,7 +71,11 @@ export const AutomationShowcase = async () => {
           </p>
           <ul className="mt-4 space-y-3">
             {WORKFLOWS.map((workflow) => (
-              <WorkflowCard key={workflow.slug} workflow={workflow} />
+              <WorkflowCard
+                key={workflow.slug}
+                workflow={workflow}
+                schedule={workflow.slug === WORKFLOW_SLUGS.morningReport ? morningReport : null}
+              />
             ))}
           </ul>
         </Card>
@@ -128,6 +135,11 @@ export const AutomationShowcase = async () => {
               <strong className="text-ink">Change the opening hours</strong> in Site settings.
             </li>
             <li>
+              <strong className="text-ink">Leave the dev server running overnight:</strong> the job
+              runner checks the schedule every minute, so the morning report shows up in the studio
+              log (and the admin’s captured mail) shortly after 07:00.
+            </li>
+            <li>
               <strong className="text-ink">Post a kiln reading</strong> at or above{' '}
               {KILN_ALERT_THRESHOLD_C} °C (lower readings are skipped by the trigger condition).
               Without the secret the webhook answers 401. Locally,{' '}
@@ -149,16 +161,6 @@ export const AutomationShowcase = async () => {
 
         <Alert tone="warning" title="Not shown, because it doesn’t work yet">
           <ul className="mt-1 list-disc space-y-1 pl-5">
-            <li>
-              Scheduled (cron) triggers can be configured but never fire in version 0.2.0 (
-              <a
-                href="https://github.com/xtr-dev/payload-automation/issues/7"
-                className="font-semibold underline"
-              >
-                issue #7
-              </a>
-              ), so the studio has no scheduled workflow.
-            </li>
             <li>
               Manual triggers can only be started from server code. The admin panel has no run
               button, so the digest button above calls the plugin’s server API.

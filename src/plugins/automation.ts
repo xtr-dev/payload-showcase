@@ -9,21 +9,30 @@ import {
   UpdateDocumentStepTask,
   workflowsPlugin,
 } from '@xtr-dev/payload-automation/server'
-import type { CollectionConfig, Endpoint, Plugin } from 'payload'
+import type { CollectionConfig, Endpoint, JobsConfig, Plugin } from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
-import { automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
+import {
+  AUTOMATION_QUEUE,
+  automationWorkflows,
+  DEV_WEBHOOK_SECRET,
+  MORNING_REPORT_TIMEZONE,
+  WORKFLOW_SLUGS,
+} from '@/seed/automation'
 
 /**
  * @xtr-dev/payload-automation
  *
- * Four code-defined workflows (see src/seed/automation.ts):
+ * Five code-defined workflows (see src/seed/automation.ts):
  * - "Booking confirmed": a bookings afterChange hook with a JSONata condition; reads the session,
  *   workshop and member, emails a confirmation and writes a studio log entry.
  * - "Kiln temperature alert": a webhook trigger with a hashed secret; calls the site's mock pager
  *   over HTTP and logs the alert.
  * - "Opening hours changed": a site-settings afterChange hook.
  * - "Studio digest": a manual trigger, run from server code by admins (src/lib/automation.ts).
+ * - "Morning kiln-room report": a scheduled (cron) trigger, every morning at 07:00 studio time;
+ *   fired by the plugin's `automation-scheduled-triggers` job task on the `automation` queue,
+ *   which `automationJobs` below runs every minute.
  *
  * Env: AUTOMATION_WEBHOOK_SECRET (the kiln alert webhook secret) and, optionally,
  * PUBLIC_KILN_PAGER_URL (where the alert workflow's HTTP step posts; defaults to this site).
@@ -71,6 +80,7 @@ export const StudioLog: CollectionConfig = {
             { label: 'Kiln webhook', value: 'webhook' },
             { label: 'Site settings', value: 'settings' },
             { label: 'Manual run', value: 'manual' },
+            { label: 'Schedule', value: 'schedule' },
           ],
         },
         {
@@ -148,6 +158,70 @@ const pagerUrlPlugin: Plugin = (config) => {
   }
 }
 
+/**
+ * Runs the automation queue every minute, without dropping other plugins' crons. The plugin's
+ * scheduled-triggers task is registered with a Payload `schedule` on this queue; Payload's
+ * autoRun handles that schedule (queues the task) and then runs the queue, so scheduled
+ * workflows fire at most about a minute after their cron time. Without a runner for this queue
+ * they would never fire.
+ */
+const automationJobs: Plugin = (config) => {
+  const jobs: JobsConfig = config.jobs ?? {}
+  const autoRun = jobs.autoRun
+  const ours = [{ cron: '* * * * *', queue: AUTOMATION_QUEUE }]
+  const otherShouldAutoRun = jobs.shouldAutoRun
+  return {
+    ...config,
+    jobs: {
+      ...jobs,
+      autoRun:
+        typeof autoRun === 'function'
+          ? async (payload) => [...(await autoRun(payload)), ...ours]
+          : [...(autoRun ?? []), ...ours],
+      // Tests set DISABLE_JOBS_AUTORUN so no cron fires while they run.
+      shouldAutoRun: async (payload) =>
+        process.env.DISABLE_JOBS_AUTORUN !== 'true' &&
+        (otherShouldAutoRun ? await otherShouldAutoRun(payload) : true),
+    },
+  }
+}
+
+/**
+ * Sets the morning report's trigger timezone after the plugin has seeded it. Seeding in
+ * payload-automation 0.3.0 copies a scheduled trigger's `schedule` but not its `timezone`, so the
+ * seeded trigger would run at 07:00 server time. This runs after the plugin's own onInit (which
+ * seeds) and only touches a trigger that has no timezone yet, so it is a no-op once the plugin
+ * seeds the timezone itself, and it leaves a timezone changed in the admin panel alone.
+ */
+const morningReportTimezonePlugin: Plugin = (config) => {
+  const incomingOnInit = config.onInit
+  return {
+    ...config,
+    onInit: async (payload) => {
+      await incomingOnInit?.(payload)
+      const { docs } = await payload.find({
+        collection: 'workflows',
+        where: { slug: { equals: WORKFLOW_SLUGS.morningReport } },
+        depth: 1,
+        limit: 1,
+        overrideAccess: true,
+        select: { triggers: true },
+      })
+      for (const trigger of docs[0]?.triggers ?? []) {
+        if (typeof trigger !== 'object' || trigger.type !== 'scheduled' || trigger.timezone) {
+          continue
+        }
+        await payload.update({
+          collection: 'automation-triggers',
+          id: trigger.id,
+          data: { timezone: MORNING_REPORT_TIMEZONE },
+          overrideAccess: true,
+        })
+      }
+    },
+  }
+}
+
 export const automation: Plugin[] = [
   studioLogPlugin,
   pagerUrlPlugin,
@@ -166,5 +240,9 @@ export const automation: Plugin[] = [
     // Runs store `users:<id>` as triggeredBy instead of an email, and keep the acting user out of
     // the stored trigger snapshot.
     stripUserData: true,
+    // Look for due scheduled triggers every minute, on the queue automationJobs runs.
+    scheduledTriggers: { tick: '* * * * *', queue: AUTOMATION_QUEUE },
   }),
+  automationJobs,
+  morningReportTimezonePlugin,
 ]

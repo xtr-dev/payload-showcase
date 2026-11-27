@@ -40,7 +40,7 @@ Mara has an active membership and two bookings; Jonas has one. `pnpm seed` refus
 | [`@xtr-dev/payload-mailing`](https://github.com/xtr-dev/payload-mailing)             | Booking confirmation, reminder and welcome emails from templates, and a scheduled newsletter. Mail is captured and shown on `/mailbox`.                                                     |
 | [`@xtr-dev/payload-notifications`](https://github.com/xtr-dev/payload-notifications) | An in-app inbox in the account area, studio-news channels and optional web push.                                                                                                            |
 | [`@xtr-dev/payload-feature-flags`](https://github.com/xtr-dev/payload-feature-flags) | An A/B test on the homepage hero, gated gift cards and a rollout of the new booking flow.                                                                                                   |
-| [`@xtr-dev/payload-automation`](https://github.com/xtr-dev/payload-automation)       | Code-defined workflows: booking paid → studio log + aftercare follow-up, a kiln-alert webhook that broadcasts studio news, opening-hours changes and an admin-run digest, with run history. |
+| [`@xtr-dev/payload-automation`](https://github.com/xtr-dev/payload-automation)       | Code-defined workflows: booking paid → studio log + aftercare follow-up, a kiln-alert webhook that broadcasts studio news, opening-hours changes, an admin-run digest and a scheduled 07:00 morning report, with run history. |
 
 The `/showcase` page explains each one. The plugins are being wired in one at a time; until then
 their spots show a placeholder.

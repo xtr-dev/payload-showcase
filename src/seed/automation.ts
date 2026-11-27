@@ -1,6 +1,7 @@
 import type { SeedWorkflow } from '@xtr-dev/payload-automation'
 import type { Payload } from 'payload'
 
+import { STUDIO_TIME_ZONE } from '@/lib/format'
 import { richText } from '@/lib/richtext'
 
 import type { SeedContext } from './types'
@@ -10,12 +11,14 @@ import type { SeedContext } from './types'
  * `seedWorkflows` option, which creates each one (with its triggers and steps) on boot when no
  * workflow with that slug exists yet, and marks it read-only in the admin panel.
  *
- * Expression rules in payload-automation 0.2.0, which these definitions follow:
+ * Expression rules in payload-automation 0.3.0, which these definitions follow:
  * - A step input value that starts with `{{` is evaluated as one JSONata expression; text around
  *   it is not interpolated, so strings are built with JSONata's `&` operator.
  * - Earlier steps are read as ``steps.`<step name>`.output`` (keyed by the step's name).
  * - Trigger conditions are plain JSONata (no braces) and see `trigger.doc`, `trigger.previousDoc`,
  *   `trigger.operation` and, for webhooks, the JSON body as `trigger.doc`.
+ * - Scheduled triggers expose `trigger.scheduledAt` (the cron occurrence being fired, ISO) and
+ *   `trigger.firedAt`.
  */
 
 /** Slugs of the seeded workflows, used by the site to find them and their runs. */
@@ -24,7 +27,20 @@ export const WORKFLOW_SLUGS = {
   kilnAlert: 'kiln-temperature-alert',
   openingHours: 'opening-hours-changed',
   studioDigest: 'studio-digest',
+  morningReport: 'morning-kiln-room-report',
 } as const
+
+/**
+ * Jobs queue of the plugin's scheduled-triggers task. src/plugins/automation.ts registers the task
+ * on it and runs it every minute.
+ */
+export const AUTOMATION_QUEUE = 'automation'
+
+/** When the morning report runs: every day at 07:00, in MORNING_REPORT_TIMEZONE. */
+export const MORNING_REPORT_SCHEDULE = '0 7 * * *'
+
+/** The studio's timezone, which the morning report's schedule is evaluated in. */
+export const MORNING_REPORT_TIMEZONE = STUDIO_TIME_ZONE
 
 /** Path segment of the kiln alert webhook: POST /api/automation/webhooks/kiln-alert. */
 export const KILN_ALERT_WEBHOOK_PATH = 'kiln-alert'
@@ -343,6 +359,104 @@ export const automationWorkflows = ({
           to: '{{trigger.data.sendTo}}',
           subject: 'Kiln & Co. studio digest',
           text: '{{steps.`Write studio log`.output.doc.message}}',
+        },
+      },
+    ],
+  },
+  {
+    slug: WORKFLOW_SLUGS.morningReport,
+    name: 'Morning kiln-room report',
+    description:
+      'Every morning at 07:00 studio time (Europe/Amsterdam) a scheduled trigger looks at the ' +
+      'day ahead: the classes starting in the next 24 hours and the bookings still waiting for ' +
+      'payment. It writes the report to the studio log and emails it to the studio admins.',
+    triggers: [
+      {
+        type: 'scheduled',
+        parameters: { schedule: MORNING_REPORT_SCHEDULE, timezone: MORNING_REPORT_TIMEZONE },
+      },
+    ],
+    steps: [
+      {
+        // The 24 hours from the occurrence being fired, not from when the job happened to run.
+        name: 'Find classes today',
+        slug: 'find-classes-today',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'sessions',
+          where: {
+            and: [
+              { status: { equals: 'scheduled' } },
+              { startsAt: { greater_than_equal: '{{trigger.scheduledAt}}' } },
+              {
+                startsAt: {
+                  less_than: '{{$fromMillis($toMillis(trigger.scheduledAt) + 86400000)}}',
+                },
+              },
+            ],
+          },
+          limit: 50,
+          depth: 0,
+        },
+      },
+      {
+        name: 'Count pending bookings',
+        slug: 'count-pending-bookings',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'bookings',
+          where: { status: { equals: 'pending' } },
+          limit: 1,
+          depth: 0,
+        },
+      },
+      {
+        name: 'Find studio admins',
+        slug: 'find-admins',
+        type: 'read-document',
+        input: {
+          collectionSlug: 'users',
+          where: { role: { equals: 'admin' } },
+          limit: 10,
+          depth: 0,
+        },
+      },
+      {
+        name: 'Write studio log',
+        slug: 'write-studio-log',
+        type: 'create-document',
+        dependencies: ['find-classes-today', 'count-pending-bookings'],
+        input: {
+          collectionSlug: 'studio-log',
+          data: {
+            title:
+              '{{"Morning report: " & $fromMillis($toMillis(trigger.scheduledAt), "[FNn] [D] [MNn]", "+0100")}}',
+            // Public text: counts and class times only.
+            message:
+              '{{$string(steps.`Find classes today`.output.totalDocs) & ' +
+              '(steps.`Find classes today`.output.totalDocs = 1 ? " class" : " classes") & ' +
+              '" in the next 24 hours" & ' +
+              '(steps.`Find classes today`.output.totalDocs > 0 ? " (" & $join(steps.`Find classes today`.output.doc.(' +
+              studioDateExpr('startsAt') +
+              '), ", ") & ")" : "") & ' +
+              '"; " & $string(steps.`Count pending bookings`.output.totalDocs) & ' +
+              '(steps.`Count pending bookings`.output.totalDocs = 1 ? " booking" : " bookings") & ' +
+              '" waiting for payment."}}',
+            source: 'schedule',
+            severity: 'info',
+          },
+        },
+      },
+      {
+        name: 'Email admins',
+        slug: 'email-admins',
+        type: 'send-email',
+        dependencies: ['write-studio-log', 'find-admins'],
+        condition: 'steps.`Find studio admins`.output.totalDocs > 0',
+        input: {
+          to: '{{$join(steps.`Find studio admins`.output.doc.email, ", ")}}',
+          subject: '{{steps.`Write studio log`.output.doc.title}}',
+          text: '{{steps.`Write studio log`.output.doc.message & "\\n\\nKiln & Co. automation"}}',
         },
       },
     ],
