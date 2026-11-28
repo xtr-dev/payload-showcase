@@ -27,6 +27,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   if (!invoice) notFound()
 
   const customer = invoice.customerInfo
+  // A shop order paid with a coupon: the lines keep their normal prices and the invoice carries
+  // the discount, so the subtotal and the discount are shown between the lines and the total.
+  const discount = invoice.discountAmount ?? 0
   return (
     <Container narrow className="py-12 lg:py-16">
       <Link href="/account" className="text-sm font-medium text-clay hover:underline">
@@ -96,6 +99,26 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             ))}
           </tbody>
           <tfoot>
+            {discount > 0 && (
+              <>
+                <tr>
+                  <th scope="row" colSpan={2} className="pt-4 text-right font-medium text-ink-soft">
+                    Subtotal
+                  </th>
+                  <td className="pt-4 text-right">
+                    {formatPrice(invoice.subtotal ?? 0, invoice.currency)}
+                  </td>
+                </tr>
+                <tr data-testid="invoice-discount">
+                  <th scope="row" colSpan={2} className="pt-1 text-right font-medium text-ink-soft">
+                    Discount
+                  </th>
+                  <td className="pt-1 text-right font-semibold text-success">
+                    −{formatPrice(discount, invoice.currency)}
+                  </td>
+                </tr>
+              </>
+            )}
             <tr>
               <th scope="row" colSpan={2} className="pt-4 text-right font-medium text-ink-soft">
                 Total (VAT included)

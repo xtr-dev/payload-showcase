@@ -18,8 +18,8 @@ import {
   DEV_WEBHOOK_SECRET,
   KILN_ALERT_THRESHOLD_C,
   KILN_ALERT_WEBHOOK_PATH,
+  KILN_PAGER_RETRY,
   KILN_PAGER_STEP,
-  STEP_RETRIES,
   WORKFLOW_SLUGS,
 } from '@/seed/automation'
 
@@ -130,6 +130,13 @@ describe('wiring', () => {
     const { docs } = await payload.find({ collection: 'workflows', limit: 10, depth: 1 })
     expect(docs.map((w) => w.slug).sort()).toEqual(Object.values(WORKFLOW_SLUGS).sort())
     expect(docs.every((w) => w.readOnly === true && w.enabled !== false)).toBe(true)
+
+    // Error handling and the run timeout come from the seed definitions, and only the workflow
+    // that polls for unpaid orders discards runs.
+    expect(docs.every((w) => w.errorHandling === 'stop' && w.timeout === 60_000)).toBe(true)
+    expect(docs.filter((w) => w.discardRunWhen).map((w) => [w.slug, w.discardRunWhen])).toEqual([
+      [WORKFLOW_SLUGS.releaseUnpaidOrders, 'steps.`cancel-unpaid-orders`.output.cancelled = 0'],
+    ])
 
     const tasks = payload.config.jobs.tasks?.map((task) => task.slug) ?? []
     expect(tasks).toEqual(
@@ -332,19 +339,19 @@ describe('Kiln temperature alert (webhook)', () => {
   })
 
   it('retries the pager call when the pager is down for a moment', async () => {
-    // Seeded steps get their retry settings from stepRetryPlugin (src/plugins/automation.ts).
+    // The plugin seeds the retry settings the step declares; no other seeded step retries.
     const { docs } = await payload.find({
       collection: 'automation-steps',
       where: { retryOnFailure: { equals: true } },
       depth: 0,
     })
-    expect(docs.map((s) => [s.name, s.maxRetries, s.retryDelay])).toEqual(
-      STEP_RETRIES.map((r) => [
+    expect(docs.map((s) => [s.name, s.maxRetries, s.retryDelay])).toEqual([
+      [
         'Kiln temperature alert - Page kiln technician',
-        r.maxRetries,
-        r.retryDelay,
-      ]),
-    )
+        KILN_PAGER_RETRY.maxRetries,
+        KILN_PAGER_RETRY.retryDelay,
+      ],
+    ])
 
     const before = pagerCalls.length
     pagerOutages = 1
@@ -369,7 +376,7 @@ describe('Kiln temperature alert (webhook)', () => {
 
   it('fails the run when the pager stays down for every attempt', async () => {
     const before = pagerCalls.length
-    const attempts = STEP_RETRIES[0].maxRetries + 1
+    const attempts = KILN_PAGER_RETRY.maxRetries + 1
     pagerOutages = attempts
     await postWebhook(alert, { authorization: `Bearer ${DEV_WEBHOOK_SECRET}` })
 

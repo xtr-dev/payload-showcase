@@ -12,7 +12,7 @@ import type { SeedContext } from './types'
  * read-only in the admin panel and, when a definition here changes, updates the stored workflow in
  * place on the next boot (steps are matched by slug, so run history keeps pointing at them).
  *
- * Expression rules in payload-automation 0.5.0, which these definitions follow:
+ * Expression rules in payload-automation 0.6.0, which these definitions follow:
  * - A step input value is evaluated only when the whole string is wrapped in `{{ }}`, as one
  *   JSONata expression; anything else is a literal, so strings are built with JSONata's `&`
  *   operator inside a single expression.
@@ -21,10 +21,13 @@ import type { SeedContext } from './types'
  *   slugs need the backticks, or JSONata reads the `-` as subtraction.
  * - A read-document step returns the matching documents as `output.docs`, the first one (or the
  *   document read by `id`) as `output.doc`, and the number of matches as `output.totalDocs`.
- * - None of these workflows set `errorHandling`, so a failing step fails the run (`stop`). The
- *   workflow `timeout` keeps its default: a run that takes longer than 5 minutes fails.
- * - A seed definition cannot carry a step's retry settings; the one step that retries gets them
- *   from `stepRetryPlugin` in src/plugins/automation.ts (see STEP_RETRIES below).
+ * - Every workflow declares `errorHandling: 'stop'` (a step that fails after its last attempt
+ *   fails the run) and a `timeout` for the whole run, through `RUN_SETTINGS` below. Declared
+ *   settings are restored on every boot, so they cannot drift from this file.
+ * - A step retries only when it declares `retryOnFailure` with its own `maxRetries` and
+ *   `retryDelay`; the kiln alert's pager call is the one step that does (see KILN_PAGER_RETRY).
+ * - `discardRunWhen` is a bare JSONata expression evaluated when a run finishes without a failed
+ *   step; when it is true the run is deleted instead of stored. "Release unpaid orders" uses it.
  * - Trigger conditions are plain JSONata (no braces) and see `trigger.doc`, `trigger.previousDoc`,
  *   `trigger.operation` and, for webhooks, the JSON body as `trigger.doc`.
  * - Scheduled triggers expose `trigger.scheduledAt` (the cron occurrence being fired, ISO) and
@@ -58,10 +61,11 @@ export const MORNING_REPORT_SCHEDULE = '0 7 * * *'
 export const MORNING_REPORT_TIMEZONE = STUDIO_TIME_ZONE
 
 /**
- * When unpaid shop orders are looked for: every 15 minutes. An order is released once it has
- * waited UNPAID_ORDER_MINUTES, so between 30 and 45 minutes after it was placed.
+ * When unpaid shop orders are looked for: every minute. An order is released once it has waited
+ * UNPAID_ORDER_MINUTES, so within about a minute of that. Checking this often is affordable
+ * because a run that released nothing is not stored (see the workflow's `discardRunWhen`).
  */
-export const RELEASE_UNPAID_ORDERS_SCHEDULE = '*/15 * * * *'
+export const RELEASE_UNPAID_ORDERS_SCHEDULE = '* * * * *'
 
 /** How long a shop order may wait for its payment (STALE_ORDER_MINUTES in src/lib/shop.ts). */
 export const UNPAID_ORDER_MINUTES = 30
@@ -72,27 +76,25 @@ export const UNPAID_ORDER_MINUTES = 30
  */
 const CANCEL_STALE_ORDERS_STEP = 'cancel-stale-orders'
 
-/** Retry settings of one seeded step, as stored on its `automation-steps` document. */
-export interface StepRetry {
-  workflow: string
-  step: string
-  /** Retries after the first attempt, so 2 means up to 3 attempts. */
-  maxRetries: number
-  /** Fixed wait between two attempts, in milliseconds. */
-  retryDelay: number
-}
-
 /** Slug of the kiln alert's HTTP step, which calls the pager and is retried when that fails. */
 export const KILN_PAGER_STEP = 'page-technician'
 
 /**
- * Seeded steps that are retried when they fail. Paging the kiln technician is a call to another
- * service, the one step here that can fail for a moment and work a second later; the step only
- * counts as failed (and fails the run) after its last attempt.
+ * Retry settings of the kiln alert's pager call. Paging the technician is a call to another
+ * service, the one step here that can fail for a moment and work a second later, so it is tried
+ * again: `maxRetries` retries after the first attempt (2 means up to 3 attempts), with a fixed
+ * `retryDelay` in milliseconds between them. The step only counts as failed, and fails the run,
+ * after its last attempt.
  */
-export const STEP_RETRIES: StepRetry[] = [
-  { workflow: WORKFLOW_SLUGS.kilnAlert, step: KILN_PAGER_STEP, maxRetries: 2, retryDelay: 500 },
-]
+export const KILN_PAGER_RETRY = { retryOnFailure: true, maxRetries: 2, retryDelay: 500 } as const
+
+/**
+ * Run settings every seeded workflow declares. `stop`: a step that fails after its last attempt
+ * fails the run, and no later step starts. `timeout`: a whole run, retries included, may take
+ * one minute; every workflow here is a handful of database reads and writes and at most one
+ * HTTP call or email, so a run that takes longer is stuck.
+ */
+const RUN_SETTINGS = { errorHandling: 'stop', timeout: 60_000 } as const
 
 /** Path segment of the kiln alert webhook: POST /api/automation/webhooks/kiln-alert. */
 export const KILN_ALERT_WEBHOOK_PATH = 'kiln-alert'
@@ -272,6 +274,7 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
   },
   {
     slug: WORKFLOW_SLUGS.kilnAlert,
@@ -290,10 +293,11 @@ export const automationWorkflows = ({
     ],
     steps: [
       {
-        // Retried up to twice when the pager does not answer (see STEP_RETRIES).
+        // Retried up to twice when the pager does not answer.
         name: 'Page kiln technician',
         slug: KILN_PAGER_STEP,
         type: 'http-request-step',
+        ...KILN_PAGER_RETRY,
         input: {
           // The pager URL is resolved at run time (see src/plugins/automation.ts), so the same
           // workflow works on the dev server, the e2e server and in tests.
@@ -342,6 +346,7 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
   },
   {
     slug: WORKFLOW_SLUGS.openingHours,
@@ -375,6 +380,7 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
   },
   {
     slug: WORKFLOW_SLUGS.studioDigest,
@@ -429,6 +435,7 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
   },
   {
     slug: WORKFLOW_SLUGS.morningReport,
@@ -527,6 +534,7 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
   },
   {
     slug: WORKFLOW_SLUGS.orderPaid,
@@ -609,15 +617,17 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
   },
   {
     slug: WORKFLOW_SLUGS.releaseUnpaidOrders,
     name: 'Release unpaid orders',
     description:
-      'A shop order holds its stock from the moment it is placed. Every 15 minutes a scheduled ' +
+      'A shop order holds its stock from the moment it is placed. Every minute a scheduled ' +
       `trigger runs a custom step that cancels orders left unpaid for ${UNPAID_ORDER_MINUTES} ` +
       'minutes; the ecommerce plugin then puts their items back on the shelf. The studio log ' +
-      'gets an entry when something was released.',
+      'gets an entry when something was released, and a run that released nothing is not kept ' +
+      'in the run history.',
     triggers: [
       {
         type: 'scheduled',
@@ -650,6 +660,11 @@ export const automationWorkflows = ({
         },
       },
     ],
+    ...RUN_SETTINGS,
+    // Most minutes there is nothing to release. Storing those runs would bury the ones that did
+    // something, so only a run that cancelled at least one order stays in the history. A failed
+    // run is always kept.
+    discardRunWhen: 'steps.`cancel-unpaid-orders`.output.cancelled = 0',
   },
 ]
 

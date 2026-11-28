@@ -12,12 +12,7 @@ import {
 import type { CollectionConfig, Endpoint, JobsConfig, Plugin } from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
-import {
-  AUTOMATION_QUEUE,
-  automationWorkflows,
-  DEV_WEBHOOK_SECRET,
-  STEP_RETRIES,
-} from '@/seed/automation'
+import { AUTOMATION_QUEUE, automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
 
 import { CancelStaleOrdersStepTask } from './ecommerce'
 
@@ -36,9 +31,13 @@ import { CancelStaleOrdersStepTask } from './ecommerce'
  *   which `automationJobs` below runs every minute.
  * - "Shop order paid": an orders afterChange hook; logs the order and, when a product in it is
  *   down to its low-stock threshold, warns the admin in their inbox.
- * - "Release unpaid orders": a scheduled trigger every 15 minutes with a custom step
+ * - "Release unpaid orders": a scheduled trigger every minute with a custom step
  *   (`CancelStaleOrdersStepTask` from src/plugins/ecommerce.ts) that cancels shop orders left
- *   unpaid for 30 minutes, so their stock goes back on sale.
+ *   unpaid for 30 minutes, so their stock goes back on sale. Runs that released nothing are
+ *   discarded (`discardRunWhen`), so the run history only shows the ones that did.
+ *
+ * Retries, error handling, run timeouts and `discardRunWhen` are declared in the seed definitions
+ * and kept in line with them by the plugin on every boot.
  *
  * Env: AUTOMATION_WEBHOOK_SECRET (the kiln alert webhook secret) and, optionally,
  * PUBLIC_KILN_PAGER_URL (where the alert workflow's HTTP step posts; defaults to this site).
@@ -146,9 +145,9 @@ const studioLogPlugin: Plugin = (config) => ({
 
 /**
  * Points the kiln alert workflow's HTTP step at this site's mock pager, unless
- * PUBLIC_KILN_PAGER_URL is set. Runs in onInit, which Next.js reaches on the first request, after
- * it has stored the port it listens on in `PORT`. The workflow reads the value at run time through
- * JSONata's `$env`, which only exposes `PUBLIC_` variables.
+ * PUBLIC_KILN_PAGER_URL is set. Runs in onInit, which Next.js reaches from src/instrumentation.ts
+ * when the server starts, after it has stored the port it listens on in `PORT`. The workflow reads
+ * the value at run time through JSONata's `$env`, which only exposes `PUBLIC_` variables.
  */
 const pagerUrlPlugin: Plugin = (config) => {
   const incomingOnInit = config.onInit
@@ -194,51 +193,6 @@ const automationJobs: Plugin = (config) => {
   }
 }
 
-/**
- * Turns on retries for the seeded steps listed in STEP_RETRIES. A step's retry settings
- * (`retryOnFailure`, `maxRetries`, `retryDelay`) are fields of its `automation-steps` document,
- * and the plugin's `seedWorkflows` definitions have no place for them, so they are written here
- * once the plugin has seeded the workflows. It must come after `workflowsPlugin` in the plugin
- * list: its onInit then runs the plugin's seeding first. Safe to run on every boot: a step that
- * already has the settings is left alone, and a step the plugin recreated gets them again.
- */
-const stepRetryPlugin: Plugin = (config) => {
-  const incomingOnInit = config.onInit
-  return {
-    ...config,
-    onInit: async (payload) => {
-      await incomingOnInit?.(payload)
-      for (const { workflow: slug, step: stepSlug, maxRetries, retryDelay } of STEP_RETRIES) {
-        const { docs } = await payload.find({
-          collection: 'workflows',
-          where: { slug: { equals: slug } },
-          limit: 1,
-          depth: 1,
-        })
-        const step = docs[0]?.steps?.find((entry) => entry.slug === stepSlug)?.step
-        if (!step || typeof step !== 'object') {
-          payload.logger.warn(`Automation: no step "${stepSlug}" in workflow "${slug}" to retry`)
-          continue
-        }
-        if (
-          step.retryOnFailure === true &&
-          step.maxRetries === maxRetries &&
-          step.retryDelay === retryDelay
-        ) {
-          continue
-        }
-        // Local API with the default overrideAccess: steps of a read-only workflow are locked
-        // for everyone else, admins included.
-        await payload.update({
-          collection: 'automation-steps',
-          id: step.id,
-          data: { retryOnFailure: true, maxRetries, retryDelay },
-        })
-      }
-    },
-  }
-}
-
 export const automation: Plugin[] = [
   studioLogPlugin,
   pagerUrlPlugin,
@@ -261,6 +215,5 @@ export const automation: Plugin[] = [
     // Look for due scheduled triggers every minute, on the queue automationJobs runs.
     scheduledTriggers: { tick: '* * * * *', queue: AUTOMATION_QUEUE },
   }),
-  stepRetryPlugin,
   automationJobs,
 ]

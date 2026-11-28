@@ -1,5 +1,5 @@
 import { runScheduledTriggers } from '@xtr-dev/payload-automation/server'
-import { useEcommerce as ecommerceHelpers } from '@xtr-dev/payload-ecommerce'
+import { getEcommerce } from '@xtr-dev/payload-ecommerce'
 import { Cron } from 'croner'
 import { randomUUID } from 'crypto'
 import { createLocalReq, type Endpoint, type Payload, type PayloadRequest } from 'payload'
@@ -30,7 +30,7 @@ import {
   ShopError,
   toCartSession,
 } from '@/lib/shop'
-import type { Invoice, Order, Payment, Product, User } from '@/payload-types'
+import type { Coupon, Invoice, Order, Payment, Product, User } from '@/payload-types'
 import { seed, type SeedContext } from '@/seed'
 import { RELEASE_UNPAID_ORDERS_SCHEDULE, WORKFLOW_SLUGS } from '@/seed/automation'
 import { CATEGORY_SEEDS, COUPON_SEEDS, PRODUCT_SEEDS } from '@/seed/ecommerce'
@@ -135,7 +135,7 @@ const orderFromCart = async (
   const cart = await getCartView(payload, sessionId)
   const quote = await quoteCart(payload, cart, { couponCode, user })
   if (user) await payload.update({ collection: 'carts', id: cart.id!, data: { user: user.id } })
-  return (await ecommerceHelpers(payload).orders.createOrderFromCart({
+  return getEcommerce(payload).orders.createOrderFromCart({
     cartId: cart.id!,
     orderData: {
       shippingAddress: ADDRESS,
@@ -143,7 +143,7 @@ const orderFromCart = async (
       shipping: shippingFor(cart.subtotal),
       couponCode: quote.coupon?.code,
     },
-  })) as Order
+  })
 }
 
 describe('Shop (payload-ecommerce)', () => {
@@ -363,9 +363,10 @@ describe('Shop (payload-ecommerce)', () => {
     const freeship = await quoteCart(payload, cart, { couponCode: 'FREESHIP' })
     expect(freeship).toMatchObject({ discount: 0, shipping: 0, total: 5600 })
 
-    // STUDIO5 works once per customer, so a guest is asked to sign in.
-    expect((await quoteCart(payload, cart, { couponCode: 'STUDIO5' })).couponError).toMatch(
-      /Sign in/,
+    // STUDIO5 works once per customer, which the plugin cannot count for a guest: it refuses
+    // the code and the shop asks the guest to sign in.
+    expect((await quoteCart(payload, cart, { couponCode: 'STUDIO5' })).couponError).toBe(
+      'Sign in to use this code: it works once per customer.',
     )
     expect(await quoteCart(payload, cart, { couponCode: 'STUDIO5', user: mara })).toMatchObject({
       discount: 500,
@@ -435,6 +436,53 @@ describe('Shop (payload-ecommerce)', () => {
     expect(
       (await quoteCart(payload, cart, { couponCode: 'STUDIO5', user: jonas })).coupon,
     ).toBeDefined()
+  })
+
+  it('words every other coupon refusal from the reason the plugin gives', async () => {
+    const session = randomUUID()
+    const tools = await product('Trimming tool set')
+    await addToCart(payload, session, { productId: tools.id, quantity: 1 })
+    const cart = await getCartView(payload, session)
+    const plain = await quoteCart(payload, cart)
+    const HOUR = 3_600_000
+    const refusals: Array<[Partial<Coupon> & { code: string }, string]> = [
+      [{ code: 'PAUSED', status: 'inactive' }, 'This code can’t be used right now.'],
+      [
+        { code: 'NEXTYEAR', validFrom: new Date(Date.now() + HOUR).toISOString() },
+        'This code isn’t valid yet.',
+      ],
+      [
+        { code: 'LASTYEAR', validUntil: new Date(Date.now() - HOUR).toISOString() },
+        'This code has expired.',
+      ],
+      [
+        { code: 'ALLGONE', usageLimit: 1, usageCount: 1 },
+        'This code has been used as often as it could be.',
+      ],
+      // A minimum that is not a round number of euros is shown to the cent.
+      [{ code: 'BIGSPENDER', minPurchase: 12_550 }, 'This code works from €125.50.'],
+      [
+        { code: 'VASESONLY', appliesToProducts: [(await product('Kiln-door vase')).id] },
+        'This code doesn’t apply to anything in your cart.',
+      ],
+    ]
+    for (const [coupon, message] of refusals) {
+      await payload.create({
+        collection: 'coupons',
+        data: { type: 'percentage', value: 10, status: 'active', ...coupon },
+      })
+      const quote = await quoteCart(payload, cart, { couponCode: coupon.code, user: mara })
+      expect(quote.couponError, coupon.code).toBe(message)
+      // A refused code changes nothing about the amounts.
+      expect(quote).toMatchObject({ discount: 0, total: plain.total, coupon: undefined })
+      await expect(
+        placeOrder(payload, session, mara, { ...ADDRESS, couponCode: coupon.code }),
+      ).rejects.toThrow(`Your discount code wasn’t applied. ${message}`)
+    }
+    await payload.delete({
+      collection: 'coupons',
+      where: { code: { in: refusals.map(([coupon]) => coupon.code) } },
+    })
   })
 
   it('lets a member read their own orders only', async () => {
@@ -554,11 +602,19 @@ describe('Shop (payload-ecommerce)', () => {
       })) as Invoice
       expect(invoice.customer ?? null).toBeNull()
       expect(invoice.customerInfo).toMatchObject({ name: 'Guus Gast', email: 'guus@kiln.test' })
-      expect(invoice.amount).toBe(order.total)
+      // The lines keep their normal prices; the coupon's discount is the invoice's own
+      // discount, and the three add up to what the order costs.
       expect(invoice.items.map((i) => [i.description, i.quantity, i.unitAmount])).toEqual([
-        ['2 × Speckled mug (Oat), less €5.60 discount', 1, 5040],
+        ['Speckled mug (Oat)', 2, 2800],
         ['Shipping', 1, SHIPPING_FLAT],
       ])
+      expect(invoice).toMatchObject({
+        subtotal: 5600 + SHIPPING_FLAT,
+        discountAmount: 560,
+        taxAmount: 0,
+        amount: 5735,
+      })
+      expect(invoice.amount).toBe(order.total)
 
       await settle(payment, 'instant-success')
       expect(await reload(order)).toMatchObject({
@@ -1050,14 +1106,33 @@ describe('Shop (payload-ecommerce)', () => {
       expect(await confirmationsFor(order)).toHaveLength(0)
     })
 
-    it('fires "Release unpaid orders" on its schedule through the custom step', async () => {
-      const { docs } = await payload.find({
-        collection: 'workflows',
-        where: { slug: { equals: WORKFLOW_SLUGS.releaseUnpaidOrders } },
-        depth: 1,
-      })
-      const trigger = docs[0].triggers![0] as { schedule: string; lastFiredAt: string }
-      expect(trigger.schedule).toBe(RELEASE_UNPAID_ORDERS_SCHEDULE)
+    it('fires "Release unpaid orders" every minute and keeps only the runs that released something', async () => {
+      const slug = WORKFLOW_SLUGS.releaseUnpaidOrders
+      const workflow = async () =>
+        (
+          await payload.find({
+            collection: 'workflows',
+            where: { slug: { equals: slug } },
+            depth: 1,
+          })
+        ).docs[0]
+      /** Fires the trigger's next occurrence, like the scheduler job does a minute later. */
+      const fireNext = async () => {
+        const doc = await workflow()
+        const trigger = doc.triggers![0] as { schedule: string; lastFiredAt: string }
+        const occurrence = new Cron(trigger.schedule).nextRun(new Date(trigger.lastFiredAt))!
+        const results = await runScheduledTriggers(payload, {
+          now: new Date(occurrence.getTime() + MINUTE / 2),
+        })
+        return results.filter((r) => String(r.workflowId) === String(doc.id))
+      }
+      const releaseLog = async () =>
+        (await payload.count({ collection: 'studio-log', where: { title: { like: 'Released' } } }))
+          .totalDocs
+
+      const seeded = await workflow()
+      expect((seeded.triggers![0] as { schedule: string }).schedule).toBe('* * * * *')
+      expect(RELEASE_UNPAID_ORDERS_SCHEDULE).toBe('* * * * *')
       expect(payload.config.jobs.tasks?.map((task) => task.slug)).toContain('cancel-stale-orders')
 
       const session = randomUUID()
@@ -1070,6 +1145,23 @@ describe('Shop (payload-ecommerce)', () => {
         email: 'slow@kiln.test',
       })
 
+      // A minute with nothing to release: every pending order is younger than the limit. The
+      // workflow ran, but its run is not kept and nothing is logged.
+      const runsBefore = (await runsOf(slug)).length
+      const logBefore = await releaseLog()
+      const idle = await fireNext()
+      expect(idle).toMatchObject([{ status: 'triggered', discarded: true }])
+      expect(await runsOf(slug)).toHaveLength(runsBefore)
+      expect(
+        await payload.findByID({
+          collection: 'workflow-runs',
+          id: idle[0].runId as number,
+          disableErrors: true,
+        }),
+      ).toBeNull()
+      expect(await releaseLog()).toBe(logBefore)
+      expect((await reload(order)).status).toBe('pending')
+
       // Make the order look old instead of moving the clock: the step uses the real time.
       await payload.db.updateOne({
         collection: 'orders',
@@ -1078,17 +1170,15 @@ describe('Shop (payload-ecommerce)', () => {
           createdAt: new Date(Date.now() - (STALE_ORDER_MINUTES + 5) * MINUTE).toISOString(),
         },
       })
-      const occurrence = new Cron(trigger.schedule).nextRun(new Date(trigger.lastFiredAt))!
-      const results = await runScheduledTriggers(payload, {
-        now: new Date(occurrence.getTime() + MINUTE / 2),
-      })
-      expect(
-        results.filter((r) => String(r.workflowId) === String(docs[0].id)).map((r) => r.status),
-      ).toEqual(['triggered'])
+      const busy = await fireNext()
+      expect(busy.map((r) => r.status)).toEqual(['triggered'])
+      expect(busy[0].discarded).toBeFalsy()
 
-      const [run] = await runsOf(WORKFLOW_SLUGS.releaseUnpaidOrders)
-      expect(run.status).toBe('completed')
-      expect(run.stepResults?.map((step) => step.status)).toEqual(['succeeded', 'succeeded'])
+      const runs = await runsOf(slug)
+      expect(runs).toHaveLength(runsBefore + 1)
+      expect(String(runs[0].id)).toBe(String(busy[0].runId))
+      expect(runs[0].status).toBe('completed')
+      expect(runs[0].stepResults?.map((step) => step.status)).toEqual(['succeeded', 'succeeded'])
       expect((await reload(order)).status).toBe('cancelled')
       const { docs: log } = await payload.find({
         collection: 'studio-log',
@@ -1097,6 +1187,10 @@ describe('Shop (payload-ecommerce)', () => {
         limit: 1,
       })
       expect(log[0]).toMatchObject({ title: 'Released 1 unpaid order', source: 'order' })
+
+      // The next minute is idle again, and the run that released the order is still there.
+      expect(await fireNext()).toMatchObject([{ status: 'triggered', discarded: true }])
+      expect((await runsOf(slug)).map((run) => run.id)).toEqual(runs.map((run) => run.id))
     })
 
     it('shows the free-shipping banner only while its flag is on', async () => {

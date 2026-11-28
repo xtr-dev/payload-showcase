@@ -2,6 +2,7 @@ import {
   billingPlugin,
   refundPayment,
   testProvider,
+  type CustomerInfoExtractor,
   type PaymentProvider,
 } from '@xtr-dev/payload-billing'
 import { mollieProvider } from '@xtr-dev/payload-billing/mollie'
@@ -9,7 +10,6 @@ import { stripeProvider } from '@xtr-dev/payload-billing/stripe'
 import type {
   Access,
   CollectionAfterChangeHook,
-  CollectionBeforeValidateHook,
   CollectionConfig,
   Endpoint,
   JobsConfig,
@@ -17,7 +17,7 @@ import type {
 } from 'payload'
 
 import { getUser, isAdmin, isAdminField, isAdminUser } from '@/access'
-import type { Booking, Invoice, Payment } from '@/payload-types'
+import type { Booking, Payment, User } from '@/payload-types'
 
 import { addFields, extendCollection } from './utils'
 
@@ -202,40 +202,14 @@ const extendPayments = (collection: CollectionConfig): CollectionConfig => ({
 })
 
 /**
- * Copies the member's name and email into the invoice's customer block when the invoice is
- * created or handed to another member, so invoices stay correct as a record even if the member
- * later changes their name or email.
- *
- * The plugin's own `customerInfoExtractor` does the same, but it also makes `customer` mandatory,
- * and the shop invoices guests, who have no user. Without the extractor the plugin accepts an
- * invoice that has either a customer or a name and email; this hook runs before that check.
+ * The customer snapshot of an invoice: the member's name and email as they are when the invoice
+ * is created (or handed to another member), so an invoice stays correct as a record after the
+ * member changes either. The plugin calls this for every invoice that has a `customer`; a guest's
+ * shop invoice has none and carries the name and email given at checkout instead.
  */
-const snapshotCustomer: CollectionBeforeValidateHook<Invoice> = async ({
-  data,
-  operation,
-  originalDoc,
-  req,
-}) => {
-  const customerId = relId(data?.customer)
-  if (!data || !customerId) return data
-  if (operation === 'create' || relId(originalDoc?.customer) !== customerId) {
-    const customer = await req.payload.findByID({
-      collection: 'users',
-      id: customerId,
-      depth: 0,
-      req,
-    })
-    data.customerInfo = { ...data.customerInfo, name: customer.name, email: customer.email }
-  }
-  return data
-}
-
-const extendInvoices = (collection: CollectionConfig): CollectionConfig => ({
-  ...collection,
-  hooks: {
-    ...collection.hooks,
-    beforeValidate: [snapshotCustomer, ...(collection.hooks?.beforeValidate ?? [])],
-  },
+const customerInfoExtractor: CustomerInfoExtractor = (customer: User) => ({
+  name: customer.name,
+  email: customer.email,
 })
 
 /**
@@ -324,16 +298,14 @@ export const billing: Plugin[] = [
   billingPlugin({
     providers,
     customerRelationSlug: 'users',
+    customerInfoExtractor,
     // Refunds created by hand (Billing → Refunds → Create) are only reservations; with this the
     // plugin queues a job that sends each one to the provider, plus a sweep every five minutes for
     // refunds left pending or still processing at the provider.
     refundJobs: { queue: BILLING_QUEUE },
     collections: {
       payments: { access: { read: ownOrAdmin('member'), ...writeAccess }, extend: extendPayments },
-      invoices: {
-        access: { read: ownOrAdmin('customer'), ...writeAccess },
-        extend: extendInvoices,
-      },
+      invoices: { access: { read: ownOrAdmin('customer'), ...writeAccess } },
       refunds: { access: { read: ownOrAdmin('payment.member'), ...writeAccess } },
     },
     hooks: {

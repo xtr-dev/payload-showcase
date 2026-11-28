@@ -73,6 +73,7 @@ export const EcommerceShowcase = async () => {
         'A cart per browser that works without an account, changed only through server actions',
         'Orders created from the cart on the server: prices, coupon and stock are the plugin’s work',
         'Coupons: a percentage, a fixed amount with a minimum, and free shipping',
+        'A refused code comes with the plugin’s reason, which the shop turns into its own message: “Sign in to use this code”, “This code works from €40”',
         'Stock that is taken when an order is placed and put back when it is cancelled or refunded',
         'Secure defaults: the public reads active products only; carts, orders and coupons are closed',
         `Integer cents with VAT included, flat ${formatPrice(SHIPPING_FLAT)} shipping and free from ${formatPrice(FREE_SHIPPING_FROM)}`,
