@@ -20,7 +20,7 @@ const STEPS = [
   ],
   [
     'Tell',
-    'A paid order is confirmed by email (payload-mailing). When an admin sets it to shipped, the member hears about it in their inbox (payload-notifications).',
+    'A paid order is confirmed by email (payload-mailing). When an admin sets it to shipped, a second email goes out, to guests too, and a member also hears about it in their inbox (payload-notifications).',
   ],
   [
     'Watch',

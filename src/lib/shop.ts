@@ -827,9 +827,66 @@ export const sendOrderConfirmation = async (
 }
 
 /**
+ * Emails "your order has shipped", rendered from the `order-shipped` template, to the email on the
+ * order: the member's, or the one a guest gave at checkout. For a guest this is the only word they
+ * get about shipping, since they have no inbox. Sent at most once per order, also when an admin
+ * moves it back and to "shipped" again: the `emails` document it queues is linked to the order,
+ * and an order that already has one is skipped. Returns the queued email, or null when nothing was
+ * sent.
+ */
+export const sendOrderShipped = async (
+  payload: Payload,
+  order: Order | number,
+  { processImmediately = false }: { processImmediately?: boolean } = {},
+): Promise<Email | null> => {
+  const doc = await payload.findByID({
+    collection: 'orders',
+    id: typeof order === 'number' ? order : order.id,
+    depth: 1,
+  })
+  if (doc.status !== 'shipped' || !doc.customerEmail || !doc.orderNumber) return null
+  const { totalDocs } = await payload.count({
+    collection: 'emails',
+    where: {
+      and: [{ order: { equals: doc.id } }, { templateSlug: { equals: TEMPLATES.orderShipped } }],
+    },
+  })
+  if (totalDocs > 0) return null
+  const address = doc.shippingAddress
+  return sendEmail<Email>(payload, {
+    template: {
+      slug: TEMPLATES.orderShipped,
+      variables: {
+        siteUrl: siteUrl(),
+        preheader: `Order ${doc.orderNumber} has left the studio.`,
+        firstName: address?.firstName ?? 'there',
+        orderNumber: doc.orderNumber,
+        orderToken: orderToken(payload, doc.orderNumber),
+        trackingNumber: doc.trackingNumber ?? '',
+        items: doc.items.map((item) => `${item.quantity} × ${orderLineLabel(item)}`).join(', '),
+        shipTo: [
+          `${address?.firstName} ${address?.lastName}`,
+          address?.address1,
+          `${address?.postalCode} ${address?.city}`,
+        ].join(', '),
+      },
+    },
+    data: {
+      to: [doc.customerEmail],
+      priority: 1,
+      order: doc.id,
+      recipient: relId(doc.user),
+    },
+    queue: MAIL_QUEUES.priority,
+    processImmediately,
+  })
+}
+
+/**
  * Tells the member who placed an order that it has shipped, on the Orders channel. Sent at most
  * once per order, also when an admin moves it back and to "shipped" again. Guests have no inbox,
- * so a guest order sends nothing. Returns the notification, or null when nothing was sent.
+ * so a guest order sends nothing here; `sendOrderShipped` emails members and guests alike. Returns
+ * the notification, or null when nothing was sent.
  */
 export const notifyOrderShipped = async (
   payload: Payload,

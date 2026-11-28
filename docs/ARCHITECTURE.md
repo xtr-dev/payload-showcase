@@ -136,7 +136,9 @@ storefront does. Its server actions (`src/components/shop/actions.ts`) and pages
   secret; this is how a guest gets back to their order, and the link in the confirmation email
   carries it), to the signed-in member who placed the order and to admins. Everyone else gets a 404. Orders are never readable by number or id alone, and guest orders not through the API at all.
 - **Tie-ins.** An orders `afterChange` hook sends the `order-confirmation` email when an order
-  becomes paid and notifies the member on the `orders` channel when it ships, each once per order.
+  becomes paid. When it ships, the hook sends the `order-shipped` email (to the order's
+  `customerEmail`, so guests get it too) and notifies the member on the `orders` channel. Each goes
+  out once per order.
   Two workflows in `src/seed/automation.ts` use the shop: "Shop order paid" (studio log, low-stock
   warning to the admin) and "Release unpaid orders" (every 15 minutes, a custom step that cancels
   orders left unpaid for 30 minutes so their stock goes back on sale).

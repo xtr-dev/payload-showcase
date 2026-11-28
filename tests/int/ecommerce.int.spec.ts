@@ -3,7 +3,7 @@ import { useEcommerce as ecommerceHelpers } from '@xtr-dev/payload-ecommerce'
 import { Cron } from 'croner'
 import { randomUUID } from 'crypto'
 import { createLocalReq, type Endpoint, type Payload, type PayloadRequest } from 'payload'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { FLAGS_SLUG } from '@/lib/experiments'
 import { MAIL_QUEUES, TEMPLATES } from '@/lib/mailing'
@@ -738,6 +738,18 @@ describe('Shop (payload-ecommerce)', () => {
         })
       ).docs
 
+    const shippedEmailsFor = async (order: Order) =>
+      (
+        await payload.find({
+          collection: 'emails',
+          where: {
+            order: { equals: order.id },
+            templateSlug: { equals: TEMPLATES.orderShipped },
+          },
+          depth: 0,
+        })
+      ).docs
+
     const runsOf = async (slug: string) =>
       (
         await payload.find({
@@ -806,10 +818,11 @@ describe('Shop (payload-ecommerce)', () => {
       expect(await confirmationsFor(order)).toHaveLength(1)
     })
 
-    it('tells a member once when their order ships, and guests nothing', async () => {
+    it('tells a member once when their order ships, in their inbox and by email', async () => {
       const order = await paidOrder('Breakfast bowl', jonas)
       expect((await confirmationsFor(order))[0]).toMatchObject({ to: [jonas.email] })
       expect(await orderNotifications(order, 'order-shipped')).toHaveLength(0)
+      expect(await shippedEmailsFor(order)).toHaveLength(0)
 
       const ship = (status: Order['status']) =>
         payload.update({
@@ -842,9 +855,105 @@ describe('Shop (payload-ecommerce)', () => {
       expect((await inbox(jonas)).totalDocs).toBe(1)
       expect((await inbox(mara)).totalDocs).toBe(0)
 
+      // The email goes to members as well, like the confirmation, and also only once.
+      const [email, ...moreEmails] = await shippedEmailsFor(order)
+      expect(moreEmails).toHaveLength(0)
+      expect(email).toMatchObject({ to: [jonas.email], recipient: jonas.id, priority: 1 })
+    })
+
+    it('emails a guest once when their order ships', async () => {
+      const session = randomUUID()
+      await addToCart(payload, session, {
+        productId: (await product('Breakfast bowl')).id,
+        quantity: 2,
+      })
+      const { order } = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'ship-to-me@kiln.test',
+      })
+      await settle(await paymentOf(order), 'instant-success')
+      // Paying confirms the order; the shipped email waits for the status change.
+      expect(await shippedEmailsFor(order)).toHaveLength(0)
+
+      const save = (data: Partial<Order>) =>
+        payload.update({ collection: 'orders', id: order.id, data })
+      await save({ status: 'shipped', trackingNumber: '3SKILN0099' })
+      const [email, ...more] = await shippedEmailsFor(order)
+      expect(more).toHaveLength(0)
+      expect(email).toMatchObject({ to: ['ship-to-me@kiln.test'], priority: 1 })
+      expect(email.subject).toBe(`Your Kiln & Co. order ${order.orderNumber} has shipped`)
+      expect(email.recipient ?? null).toBeNull()
+      // A guest has no inbox, so the email is the only message.
+      expect(await orderNotifications(order, 'order-shipped')).toHaveLength(0)
+
+      // Saving the shipped order again, or moving it away and back, never sends a second one.
+      await save({ status: 'shipped' })
+      await save({ notes: 'Left with the neighbours' })
+      await save({ status: 'delivered' })
+      await save({ status: 'shipped' })
+      expect(await shippedEmailsFor(order)).toHaveLength(1)
+
+      await payload.jobs.run({ queue: MAIL_QUEUES.priority, limit: 100 })
+      const { docs: delivered } = await payload.find({
+        collection: MAIL_OUTBOX_SLUG,
+        where: {
+          to: { equals: 'ship-to-me@kiln.test' },
+          subject: { contains: 'has shipped' },
+        },
+      })
+      expect(delivered).toHaveLength(1)
+      const html = delivered[0].html ?? ''
+      expect(html).toContain('on its way, Guus')
+      expect(html).toContain('2 × Breakfast bowl')
+      expect(html).toContain('Tracking number: 3SKILN0099')
+      expect(html).toContain('Guus Gast, Strandweg 12, 2042 AA Zandvoort')
+      // The link lets a guest back in: it carries the order's token.
+      expect(html).toContain(orderPath(payload, order).replace('&', '&amp;'))
+    })
+
+    it('ships an order even when the shipped email cannot be sent', async () => {
       const guestOrder = await paidOrder('Breakfast bowl')
+      const memberOrder = await paidOrder('Breakfast bowl', jonas)
+      // Without its template the email cannot be rendered, so every send throws.
+      const { docs: templates } = await payload.find({
+        collection: 'email-templates',
+        where: { slug: { equals: TEMPLATES.orderShipped } },
+      })
+      expect(templates).toHaveLength(1)
+      const renameTemplate = (slug: string) =>
+        payload.update({ collection: 'email-templates', id: templates[0].id, data: { slug } })
+      await renameTemplate('order-shipped-missing')
+      const logged = vi.spyOn(payload.logger, 'error')
+      try {
+        for (const order of [guestOrder, memberOrder]) {
+          const saved = await payload.update({
+            collection: 'orders',
+            id: order.id,
+            data: { status: 'shipped' },
+          })
+          expect(saved.status).toBe('shipped')
+          expect((await reload(order)).status).toBe('shipped')
+          expect(await shippedEmailsFor(order)).toHaveLength(0)
+        }
+        expect(logged).toHaveBeenCalledTimes(2)
+        expect(logged.mock.calls[0][0]).toMatchObject({
+          msg: `Shipped email for order ${guestOrder.orderNumber} failed`,
+        })
+        // The member's inbox notification does not depend on the email.
+        expect(await orderNotifications(memberOrder, 'order-shipped')).toHaveLength(1)
+      } finally {
+        logged.mockRestore()
+        await renameTemplate(TEMPLATES.orderShipped)
+      }
+
+      // Nothing was recorded for the failed send, so shipping the order again does send it.
+      await payload.update({
+        collection: 'orders',
+        id: guestOrder.id,
+        data: { status: 'processing' },
+      })
       await payload.update({ collection: 'orders', id: guestOrder.id, data: { status: 'shipped' } })
-      expect(await orderNotifications(guestOrder, 'order-shipped')).toHaveLength(0)
+      expect(await shippedEmailsFor(guestOrder)).toHaveLength(1)
     })
 
     it('runs the "Shop order paid" workflow: a log entry, and a low-stock warning for the admin', async () => {

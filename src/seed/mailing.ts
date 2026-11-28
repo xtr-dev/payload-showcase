@@ -97,7 +97,7 @@ const sampleBooking = {
   paid: true,
 }
 
-/** The six templates. Editors can change all of them under Mailing → Email Templates. */
+/** The seven templates. Editors can change all of them under Mailing → Email Templates. */
 const templates = (featured: Workshop | undefined) => [
   {
     name: 'Booking confirmation',
@@ -266,6 +266,42 @@ const templates = (featured: Workshop | undefined) => [
       shipTo: 'Mara de Vries, Strandweg 12, 2042 AA Zandvoort',
     },
   },
+  {
+    // Sent by sendOrderShipped (src/lib/shop.ts) when a shop order is set to shipped. The link
+    // carries the order's token, so a guest can open their order from the email.
+    name: 'Shop order shipped',
+    slug: TEMPLATES.orderShipped,
+    subject: 'Your Kiln & Co. order {{ orderNumber }} has shipped',
+    content: doc(
+      { h: 'It’s on its way, {{ firstName }}' },
+      ['Your order ', { b: '{{ orderNumber }}' }, ' left the studio today.'],
+      {
+        ul: [
+          'Items: {{ items }}',
+          'Ships to: {{ shipTo }}',
+          '{% if trackingNumber != "" %}Tracking number: {{ trackingNumber }}{% else %}Sent without tracking; it usually arrives within three working days.{% endif %}',
+        ],
+      },
+      [
+        {
+          a: 'Follow your order',
+          href: '{{siteUrl}}/shop/orders/{{orderNumber}}?t={{orderToken}}',
+        },
+      ],
+      'Unwrap it carefully: there is a lot of paper.',
+    ),
+    variables: required('firstName', 'orderNumber', 'items', 'orderToken'),
+    sampleVariables: {
+      siteUrl: 'http://localhost:3000',
+      preheader: 'Your order has left the studio.',
+      firstName: 'Mara',
+      orderNumber: 'ORD-1764000000000-042',
+      orderToken: '0000000000000000000000000000000000000000',
+      trackingNumber: '3SKILN0042',
+      items: '2 × Speckled mug (Celadon), 1 × Breakfast bowl',
+      shipTo: 'Mara de Vries, Strandweg 12, 2042 AA Zandvoort',
+    },
+  },
 ]
 
 /** 09:00 studio time (08:00 UTC in winter) on the first day of next month. */
@@ -273,7 +309,7 @@ export const nextNewsletterDate = (now = new Date()): Date =>
   new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 8, 0, 0))
 
 /**
- * Seeds the mailing integration: the six templates, a welcome email for each member and a
+ * Seeds the mailing integration: the seven templates, a welcome email for each member and a
  * confirmation for each paid seeded booking (sent immediately, so the outbox has something to show),
  * class reminders scheduled 24 hours before each session, and next month's newsletter scheduled
  * for the subscribers (Mara subscribes, Jonas doesn't).
