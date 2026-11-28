@@ -41,6 +41,12 @@ export default buildConfig({
     client: {
       url: process.env.DATABASE_URL || 'file:./kiln.db',
     },
+    // Write-ahead logging. The SQLite client runs every statement synchronously on the server's
+    // only thread, so no request is answered while a write waits for the disk. SQLite's default
+    // rollback journal syncs to disk several times per write; the write-ahead log does it once.
+    // SQLITE_SYNCHRONOUS=NORMAL stops syncing on every write (the log is synced at checkpoints):
+    // faster, and a crash cannot corrupt the database, but a power cut can lose the last writes.
+    wal: { synchronous: process.env.SQLITE_SYNCHRONOUS === 'NORMAL' ? 'NORMAL' : 'FULL' },
   }),
   sharp,
   plugins,

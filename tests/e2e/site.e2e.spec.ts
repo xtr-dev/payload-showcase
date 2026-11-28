@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { registerMember, signIn, USERS } from '../helpers/e2e'
+import { registerMember, signInWithForm, USERS } from '../helpers/e2e'
 
 test.describe('home', () => {
   test('renders the hero, featured workshops and testimonials', async ({ page, baseURL }) => {
@@ -64,7 +64,8 @@ test.describe('workshops', () => {
 
 test.describe('accounts', () => {
   test('a seeded member can sign in and see their bookings', async ({ page }) => {
-    await signIn(page, USERS.mara)
+    // The only test that logs a seeded account in through the form (see createSeededSessions).
+    await signInWithForm(page, USERS.mara)
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Welcome back, Mara')
     const bookings = page.getByTestId('bookings')
     await expect(bookings.getByRole('listitem')).toHaveCount(2)

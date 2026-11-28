@@ -19,7 +19,8 @@ pnpm dev                # http://localhost:3000, admin at /admin
 
 On the first `pnpm dev`, the empty SQLite database (`kiln.db`) is seeded automatically. Run
 `pnpm seed` at any time to reset it to the demo data. If a schema change makes the dev database
-prompt or fail, delete `kiln.db` and run `pnpm seed`.
+prompt or fail, delete `kiln.db*` (the database and its write-ahead log, `kiln.db-wal` and
+`kiln.db-shm`) and run `pnpm seed`.
 
 ## Seeded logins (development only)
 

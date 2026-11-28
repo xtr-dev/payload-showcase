@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
-import { registerMember, USERS } from '../helpers/e2e'
+import { adminApi, registerMember, signInToAdmin } from '../helpers/e2e'
 
 /**
  * End-to-end tests for the @xtr-dev/payload-ecommerce integration: the shop's catalogue, cart and
@@ -47,14 +47,6 @@ const payOnTestProvider = async (page: Page, scenario: string) => {
   await page.getByRole('button', { name: 'Process Test Payment' }).click()
   // The provider sends the customer back to the order page, with the order's token.
   await page.waitForURL(/\/shop\/orders\/ORD-[\d-]+\?t=[0-9a-f]{40}$/, { timeout: 20_000 })
-}
-
-const signInAsAdmin = async (page: Page) => {
-  await page.goto('/admin/login')
-  await page.getByLabel('Email').fill(USERS.admin.email)
-  await page.getByLabel('Password').fill(USERS.admin.password)
-  await page.getByRole('button', { name: 'Login' }).click()
-  await page.waitForURL(/\/admin$/)
 }
 
 test.describe('Shop (payload-ecommerce)', () => {
@@ -271,7 +263,7 @@ test.describe('Shop (payload-ecommerce)', () => {
 
     // payload-notifications: an admin ships the order and the member hears about it.
     const admin = await (await browser.newContext()).newPage()
-    await signInAsAdmin(admin)
+    await signInToAdmin(admin)
     const found = await admin.request.get(
       `/api/orders?where[orderNumber][equals]=${number}&depth=0`,
     )
@@ -324,7 +316,7 @@ test.describe('Shop (payload-ecommerce)', () => {
     const number = (await page.getByTestId('order-number').textContent())!.trim()
 
     const admin = await (await browser.newContext()).newPage()
-    await signInAsAdmin(admin)
+    await signInToAdmin(admin)
     const found = await admin.request.get(
       `/api/orders?where[orderNumber][equals]=${number}&depth=0`,
     )
@@ -364,8 +356,7 @@ test.describe('Shop (payload-ecommerce)', () => {
   })
 
   test('the shop disappears while its flag is off', async ({ page, playwright, baseURL }) => {
-    const api = await playwright.request.newContext({ baseURL })
-    expect((await api.post('/api/users/login', { data: USERS.admin })).ok()).toBe(true)
+    const api = await adminApi(playwright, baseURL)
     const nav = page.getByRole('navigation', { name: 'Main' }).first()
     try {
       await setShopFlag(api, false)
