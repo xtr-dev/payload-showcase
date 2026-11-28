@@ -87,6 +87,9 @@ file, keep it minimal and mention it in your PR.
   `status="live"`. Keep the `ShowcaseSection` frame.
 - **Tests.** Replace the `it.todo` / `test.fixme` stubs. Integration tests use `getTestPayload()`
   and `seed()`; e2e tests run against the seeded production build (use `tests/helpers/e2e.ts`).
+  E2E tests run in parallel and share the seeded accounts: sign in with the helpers (`signIn`,
+  `signInToAdmin`, `adminApi`), which reuse one session per account, and never post a seeded
+  login yourself, because logins of one account that overlap sign each other out.
   CI must stay green with no secrets.
 - **Generated files.** `src/payload-types.ts` and `src/app/(payload)/admin/importMap.js` will
   conflict between branches. Resolve by taking either side and rerunning `pnpm generate:types`

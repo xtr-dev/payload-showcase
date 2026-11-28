@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { registerMember, signIn, USERS } from '../helpers/e2e'
+import { registerMember, signIn, signInToAdmin, USERS } from '../helpers/e2e'
 
 /**
  * End-to-end tests for the @xtr-dev/payload-billing integration: a full checkout through the
@@ -87,11 +87,7 @@ test.describe('Billing (payload-billing)', () => {
 
     // The admin refunds the booking from its edit view.
     const admin = await (await browser.newContext()).newPage()
-    await admin.goto('/admin/login')
-    await admin.getByLabel('Email').fill(USERS.admin.email)
-    await admin.getByLabel('Password').fill(USERS.admin.password)
-    await admin.getByRole('button', { name: 'Login' }).click()
-    await admin.waitForURL(/\/admin$/)
+    await signInToAdmin(admin)
     const res = await admin.request.get(
       `/api/bookings?where[reference][equals]=${reference}&depth=0`,
     )

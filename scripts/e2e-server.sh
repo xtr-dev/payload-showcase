@@ -13,6 +13,10 @@ export DATABASE_URL="file:./.e2e/kiln-e2e.db"
 export MEDIA_DIR="./.e2e/media"
 export PAYLOAD_SECRET="${PAYLOAD_SECRET:-e2e-secret-not-for-production}"
 export SEED_ON_INIT=false
+# The e2e database is thrown away after the run, so it does not need to survive a power cut.
+# Without a disk sync on every write the server answers at the same speed whatever else is
+# using the disk; with one, a busy disk has stalled all requests for seconds at a time.
+export SQLITE_SYNCHRONOUS=NORMAL
 # `next start` runs in production mode, where the site makes up a random kiln alert webhook
 # secret on every start unless one is set, and the automation plugin stores the hash of whatever
 # secret the server starts with. The e2e suite calls the webhook with this same default.

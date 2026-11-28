@@ -171,7 +171,7 @@ export const AutomationShowcase = async () => {
             </li>
             <li>
               Seeded workflows are created once and not updated when their code changes. Delete{' '}
-              <code className="font-mono">kiln.db</code> and run{' '}
+              <code className="font-mono">kiln.db*</code> and run{' '}
               <code className="font-mono">pnpm seed</code> to pick up changes.
             </li>
           </ul>

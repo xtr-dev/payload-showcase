@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { registerMember, USERS } from '../helpers/e2e'
+import { adminApi, registerMember, signInToAdmin } from '../helpers/e2e'
 
 /**
  * End-to-end tests for the @xtr-dev/payload-feature-flags integration.
@@ -12,13 +12,6 @@ const HERO_PREVIEW_COOKIE = 'kiln_preview_home-hero'
 const HEADINGS = {
   a: 'Get your hands in the clay.',
   b: 'Your first bowl is one evening away.',
-}
-
-/** Signs an API context in as the seeded admin. */
-const adminApi = async (request: APIRequestContext) => {
-  const res = await request.post('/api/users/login', { data: USERS.admin })
-  expect(res.ok()).toBe(true)
-  return request
 }
 
 const setFlag = async (
@@ -67,7 +60,7 @@ test.describe('FeatureFlags (payload-feature-flags)', () => {
     await cta.click()
     await page.waitForURL((url) => url.pathname.startsWith('/workshops'))
 
-    const api = await adminApi(await playwright.request.newContext({ baseURL }))
+    const api = await adminApi(playwright, baseURL)
     await expect
       .poll(async () => {
         const res = await api.get(
@@ -107,11 +100,7 @@ test.describe('FeatureFlags (payload-feature-flags)', () => {
   test('shows the plugin dashboard at /admin/feature-flags-overview to an admin', async ({
     page,
   }) => {
-    await page.goto('/admin/login')
-    await page.getByLabel('Email').fill(USERS.admin.email)
-    await page.getByLabel('Password').fill(USERS.admin.password)
-    await page.getByRole('button', { name: 'Login' }).click()
-    await page.waitForURL(/\/admin$/)
+    await signInToAdmin(page)
 
     const res = await page.goto('/admin/feature-flags-overview')
     expect(res?.status()).toBe(200)
@@ -121,7 +110,7 @@ test.describe('FeatureFlags (payload-feature-flags)', () => {
 
   test.describe('gift cards', () => {
     test('appear and disappear with the gift-cards flag', async ({ page, playwright, baseURL }) => {
-      const api = await adminApi(await playwright.request.newContext({ baseURL }))
+      const api = await adminApi(playwright, baseURL)
       const nav = page.getByRole('navigation', { name: 'Main' }).first()
       try {
         await page.goto('/')
@@ -150,7 +139,7 @@ test.describe('FeatureFlags (payload-feature-flags)', () => {
     playwright,
     baseURL,
   }) => {
-    const api = await adminApi(await playwright.request.newContext({ baseURL }))
+    const api = await adminApi(playwright, baseURL)
     try {
       // Roll out to everyone, so the new member is certainly in the rollout.
       await setFlag(api, 'new-booking-flow', { rolloutPercentage: 100 })
