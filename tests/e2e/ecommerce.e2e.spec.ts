@@ -190,7 +190,8 @@ test.describe('Shop (payload-ecommerce)', () => {
     const url = new URL(page.url())
     const stranger = await (await browser.newContext()).newPage()
     expect((await stranger.goto(url.pathname))?.status()).toBe(404)
-    expect((await stranger.goto(`${url.pathname}?t=${'0'.repeat(40)}`))?.status()).toBe(404)
+    expect(url.searchParams.get('t')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect((await stranger.goto(`${url.pathname}?t=${'0'.repeat(43)}`))?.status()).toBe(404)
     expect((await stranger.goto(url.pathname + url.search))?.status()).toBe(200)
     const api = await stranger.request.get('/api/orders')
     expect(api.status()).toBe(403)
@@ -258,7 +259,7 @@ test.describe('Shop (payload-ecommerce)', () => {
     await expect(email.getByText('Items: 3 × Breakfast bowl')).toBeVisible()
     await expect(email.getByRole('link', { name: 'Follow your order' })).toHaveAttribute(
       'href',
-      new RegExp(`/shop/orders/${number}\\?t=[0-9a-f]{40}$`),
+      new RegExp(`/shop/orders/${number}\\?t=[A-Za-z0-9_-]{43}$`),
     )
 
     // payload-notifications: an admin ships the order and the member hears about it.

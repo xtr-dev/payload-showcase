@@ -74,6 +74,8 @@ export const EcommerceShowcase = async () => {
         'Orders created from the cart on the server: prices, coupon and stock are the plugin’s work',
         'Coupons: a percentage, a fixed amount with a minimum, and free shipping',
         'A refused code comes with the plugin’s reason, which the shop turns into its own message: “Sign in to use this code”, “This code works from €40”',
+        'An order that loses the last piece to someone else is rejected with its cause, so checkout can say which item and how many are left',
+        'An access token on every order, hidden from the API and the admin panel, that lets a guest open their order from the link in their email',
         'Stock that is taken when an order is placed and put back when it is cancelled or refunded',
         'Secure defaults: the public reads active products only; carts, orders and coupons are closed',
         `Integer cents with VAT included, flat ${formatPrice(SHIPPING_FLAT)} shipping and free from ${formatPrice(FREE_SHIPPING_FROM)}`,

@@ -1,5 +1,5 @@
 import { runScheduledTriggers } from '@xtr-dev/payload-automation/server'
-import { getEcommerce } from '@xtr-dev/payload-ecommerce'
+import { getEcommerce, getOrderRejection } from '@xtr-dev/payload-ecommerce'
 import { Cron } from 'croner'
 import { randomUUID } from 'crypto'
 import { createLocalReq, type Endpoint, type Payload, type PayloadRequest } from 'payload'
@@ -19,7 +19,7 @@ import {
   includedVat,
   MAX_LINE_QUANTITY,
   orderPath,
-  orderToken,
+  orderRefusal,
   placeOrder,
   quoteCart,
   restoreCartFromOrder,
@@ -334,7 +334,14 @@ describe('Shop (payload-ecommerce)', () => {
     const cart = await getCartView(payload, session)
     expect(cart.blocked).toBe(true)
     expect(cart.lines[0].problem).toBe('Sold out')
-    await expect(orderFromCart(session)).rejects.toThrow('Not enough stock')
+    const refused = await orderFromCart(session).catch((error: unknown) => error)
+    expect(getOrderRejection(refused)).toMatchObject({
+      type: 'stock',
+      reason: 'out_of_stock',
+      product: plate.id,
+      requested: 1,
+      available: 0,
+    })
     expect((await product('Ochre serving plate')).inventory?.quantity).toBe(0)
   })
 
@@ -455,6 +462,8 @@ describe('Shop (payload-ecommerce)', () => {
         { code: 'LASTYEAR', validUntil: new Date(Date.now() - HOUR).toISOString() },
         'This code has expired.',
       ],
+      // A coupon an admin retired by hand, without an end date.
+      [{ code: 'RETIRED', status: 'expired' }, 'This code has expired.'],
       [
         { code: 'ALLGONE', usageLimit: 1, usageCount: 1 },
         'This code has been used as often as it could be.',
@@ -595,7 +604,7 @@ describe('Shop (payload-ecommerce)', () => {
       const payment = await paymentOf(order)
       expect(payment).toMatchObject({ amount: 5735, currency: 'EUR', status: 'pending' })
       expect(payment.member ?? null).toBeNull()
-      expect(payment.redirectUrl).toBe(orderPath(payload, order))
+      expect(payment.redirectUrl).toBe(orderPath(order))
       const invoice = (await payload.findByID({
         collection: 'invoices',
         id: relId(payment.invoice) as number,
@@ -626,26 +635,79 @@ describe('Shop (payload-ecommerce)', () => {
         'paid',
       )
 
-      // The order page: only with the token, as the member who placed it, or as an admin.
+      // The order page: only with the order's own token, as the member who placed it, or as an
+      // admin.
       const number = order.orderNumber!
-      const token = orderToken(payload, number)
+      const token = order.accessToken!
+      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      expect(redirectTo).not.toContain(token)
+      expect(orderPath(order)).toBe(`/shop/orders/${number}?t=${token}`)
       const see = (opts: Parameters<typeof getOrderForVisitor>[2]) =>
         getOrderForVisitor(payload, number, opts)
       expect((await see({ token }))?.id).toBe(order.id)
       expect((await see({ user: ctx.admin }))?.id).toBe(order.id)
+
+      // Another order's token, a damaged one, none at all and values that are not text are all
+      // refused, with or without a signed-in member who did not place the order.
+      const bowl = await product('Breakfast bowl')
+      await addToCart(payload, session, { productId: bowl.id, quantity: 1 })
+      const other = await orderFromCart(session)
+      expect(other.accessToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      expect(other.accessToken).not.toBe(token)
+      await getEcommerce(payload).orders.updateOrderStatus({
+        orderId: other.id,
+        status: 'cancelled',
+      })
       for (const wrong of [
         undefined,
+        null,
         '',
         token.slice(1),
         `${token}0`,
-        orderToken(payload, 'ORD-1'),
+        token.toLowerCase(),
+        other.accessToken,
+        [token],
+        { equals: token },
+        // The link format used before orders had their own token: 40 hex characters.
+        '0'.repeat(40),
       ]) {
-        expect(await see({ token: wrong })).toBeNull()
+        expect(await see({ token: wrong }), JSON.stringify(wrong)).toBeNull()
+        expect(await see({ token: wrong, user: mara }), JSON.stringify(wrong)).toBeNull()
       }
+      expect(await see({})).toBeNull()
       expect(await see({ user: mara })).toBeNull()
+      expect(await getOrderForVisitor(payload, other.orderNumber, { token })).toBeNull()
       expect(await getOrderForVisitor(payload, 'ORD-0-000', { token })).toBeNull()
       expect(await getOrderForVisitor(payload, `${number}' OR 1=1`, { token })).toBeNull()
-      // And never through the API.
+      expect(await getOrderForVisitor(payload, undefined, { token })).toBeNull()
+
+      // The token itself is never readable or usable as a filter through the API, by admins
+      // either.
+      const asAdmin = await payload.findByID({
+        collection: 'orders',
+        id: order.id,
+        user: ctx.admin,
+        overrideAccess: false,
+      })
+      expect(asAdmin.id).toBe(order.id)
+      expect(asAdmin.accessToken).toBeUndefined()
+      await expect(
+        payload.find({
+          collection: 'orders',
+          where: { accessToken: { equals: token } },
+          user: ctx.admin,
+          overrideAccess: false,
+        }),
+      ).rejects.toThrow()
+      await payload.update({
+        collection: 'orders',
+        id: order.id,
+        data: { accessToken: 'chosen-by-an-admin' },
+        user: ctx.admin,
+        overrideAccess: false,
+      })
+      expect((await reload(order)).accessToken).toBe(token)
+      // And the order as a whole never through the API for anyone else.
       await expect(
         payload.findByID({ collection: 'orders', id: order.id, overrideAccess: false }),
       ).rejects.toThrow()
@@ -689,6 +751,18 @@ describe('Shop (payload-ecommerce)', () => {
       const number = order.orderNumber!
       expect((await getOrderForVisitor(payload, number, { user: jonas }))?.id).toBe(order.id)
       expect(await getOrderForVisitor(payload, number, { user: mara })).toBeNull()
+      // The link works without signing in too, and a member reading their own order through the
+      // API does not get the token.
+      expect((await getOrderForVisitor(payload, number, { token: order.accessToken }))?.id).toBe(
+        order.id,
+      )
+      const viaApi = await payload.findByID({
+        collection: 'orders',
+        id: order.id,
+        user: jonas,
+        overrideAccess: false,
+      })
+      expect(viaApi.accessToken).toBeUndefined()
       const own = await payload.find({ collection: 'orders', user: jonas, overrideAccess: false })
       expect(own.docs.map((o) => o.id)).toContain(order.id)
 
@@ -697,6 +771,131 @@ describe('Shop (payload-ecommerce)', () => {
       const guest = await placeOrder(payload, session, null, { ...DELIVERY, email: 'g@kiln.test' })
       expect(guest.order.user ?? null).toBeNull()
       await settle(await paymentOf(guest.order), 'instant-success')
+    })
+
+    it('words an order the plugin rejects from the cause it gives', async () => {
+      const bowl = await product('Breakfast bowl')
+      const mug = await product('Speckled mug')
+      const lines = [
+        { product: bowl, variant: null },
+        { product: mug, variant: 'Oat' },
+        { product: mug, variant: 'Cobalt' },
+      ]
+      const stock = { type: 'stock', reason: 'out_of_stock', requested: 2 } as const
+      expect(orderRefusal({ ...stock, product: bowl.id, available: 1 }, lines)).toBe(
+        'We only have 1 of “Breakfast bowl” left. Change the quantity in your cart and try again.',
+      )
+      expect(
+        orderRefusal({ ...stock, product: mug.id, variant: 'Cobalt', available: 0 }, lines),
+      ).toBe(
+        'We just sold the last of “Speckled mug (Cobalt)”. Remove it from your cart and try again.',
+      )
+      // No number: the units went to an order placed at the same moment.
+      expect(orderRefusal({ ...stock, product: bowl.id }, lines)).toBe(
+        'Someone just bought the last of “Breakfast bowl”. Check your cart and try again.',
+      )
+      // A product that is not in the cart's lines is still reported, without a name.
+      expect(orderRefusal({ ...stock, product: 987_654, available: 0 }, lines)).toBe(
+        'We just sold the last of one of your items. Remove it from your cart and try again.',
+      )
+      expect(orderRefusal({ type: 'coupon', reason: 'usage_limit' })).toBe(
+        'Your discount code wasn’t applied. This code has been used as often as it could be.',
+      )
+      expect(orderRefusal({ type: 'coupon', reason: 'min_purchase', minPurchase: 5000 })).toBe(
+        'Your discount code wasn’t applied. This code works from €50.',
+      )
+      expect(orderRefusal({ type: 'coupon', reason: 'expired' })).toBe(
+        'Your discount code wasn’t applied. This code has expired.',
+      )
+    })
+
+    it('tells the customer why when stock or a coupon runs out during checkout', async () => {
+      const bowl = await product('Breakfast bowl')
+      const inStock = bowl.inventory!.quantity!
+      const orders = async () => (await payload.count({ collection: 'orders' })).totalDocs
+
+      /**
+       * Runs `change` between the checkout's own checks of the cart and the plugin creating the
+       * order, which is when another customer's order can get in. The checkout's write to the
+       * cart is the last thing it does before it creates the order, so the change rides on that.
+       */
+      const duringCheckout = (change: () => Promise<unknown>) => {
+        const update = payload.update.bind(payload) as (args: unknown) => Promise<unknown>
+        const spy = vi.spyOn(payload, 'update')
+        spy.mockImplementationOnce((async (args: { collection: string }) => {
+          expect(args.collection).toBe('carts')
+          spy.mockRestore()
+          await change()
+          return update(args)
+        }) as never)
+      }
+
+      // Two bowls in the cart, and all but one are sold meanwhile.
+      const session = randomUUID()
+      await addToCart(payload, session, { productId: bowl.id, quantity: 2 })
+      const before = await orders()
+      duringCheckout(() =>
+        payload.update({
+          collection: 'products',
+          id: bowl.id,
+          data: { inventory: { quantity: 1 } },
+        }),
+      )
+      const stockError = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'late@kiln.test',
+      }).catch((error: unknown) => error)
+      expect(stockError).toBeInstanceOf(ShopError)
+      expect((stockError as ShopError).message).toBe(
+        'We only have 1 of “Breakfast bowl” left. Change the quantity in your cart and try again.',
+      )
+      expect(await orders()).toBe(before)
+      // Nothing was taken, and the cart is still there to change.
+      expect((await product('Breakfast bowl')).inventory?.quantity).toBe(1)
+      expect((await getCartView(payload, session)).count).toBe(2)
+      await payload.update({
+        collection: 'products',
+        id: bowl.id,
+        data: { inventory: { quantity: inStock } },
+      })
+
+      // The coupon's last use goes to someone else meanwhile.
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'LASTCALL', type: 'percentage', value: 10, status: 'active', usageLimit: 1 },
+      })
+      duringCheckout(() =>
+        payload.update({ collection: 'coupons', id: coupon.id, data: { usageCount: 1 } }),
+      )
+      const couponError = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'late@kiln.test',
+        couponCode: 'LASTCALL',
+      }).catch((error: unknown) => error)
+      expect(couponError).toBeInstanceOf(ShopError)
+      expect((couponError as ShopError).message).toBe(
+        'Your discount code wasn’t applied. This code has been used as often as it could be.',
+      )
+      expect(await orders()).toBe(before)
+      expect((await product('Breakfast bowl')).inventory?.quantity).toBe(inStock)
+      await payload.delete({ collection: 'coupons', id: coupon.id })
+
+      // Anything that is not a refusal by the plugin stays vague and is logged: here the cart is
+      // emptied meanwhile, as when the same cart is checked out in a second tab.
+      const logged = vi.spyOn(payload.logger, 'error').mockImplementation(() => undefined)
+      const cartId = (await getCartView(payload, session)).id!
+      duringCheckout(() => getEcommerce(payload).cart.clearCart(cartId))
+      const otherError = await placeOrder(payload, session, null, {
+        ...DELIVERY,
+        email: 'late@kiln.test',
+      }).catch((error: unknown) => error)
+      expect(otherError).toBeInstanceOf(ShopError)
+      expect((otherError as ShopError).message).toBe(
+        'We couldn’t place your order. Please try again.',
+      )
+      expect(logged).toHaveBeenCalledTimes(1)
+      logged.mockRestore()
+      expect(await orders()).toBe(before)
     })
 
     it('cancels the order and restocks when the payment fails, and can refill the cart', async () => {
@@ -866,7 +1065,7 @@ describe('Shop (payload-ecommerce)', () => {
       expect(html).toContain('€6.80 discount')
       expect(html).toContain('Guus Gast, Strandweg 12, 2042 AA Zandvoort')
       // The link lets a guest back in: it carries the order's token.
-      expect(html).toContain(orderPath(payload, order).replace('&', '&amp;'))
+      expect(html).toContain(orderPath(order))
 
       // Later changes to the order never send it again.
       await payload.update({ collection: 'orders', id: order.id, data: { status: 'shipped' } })
@@ -964,7 +1163,7 @@ describe('Shop (payload-ecommerce)', () => {
       expect(html).toContain('Tracking number: 3SKILN0099')
       expect(html).toContain('Guus Gast, Strandweg 12, 2042 AA Zandvoort')
       // The link lets a guest back in: it carries the order's token.
-      expect(html).toContain(orderPath(payload, order).replace('&', '&amp;'))
+      expect(html).toContain(orderPath(order))
     })
 
     it('ships an order even when the shipped email cannot be sent', async () => {
@@ -1021,6 +1220,13 @@ describe('Shop (payload-ecommerce)', () => {
       const runs = await runsOf(WORKFLOW_SLUGS.orderPaid)
       expect(runs).toHaveLength(before + 1)
       expect(runs[0].status).toBe('completed')
+      // The run keeps the order that triggered it, and admins can read runs: the order's access
+      // token must not be in there.
+      expect(order.accessToken).toBeTruthy()
+      expect(runs[0].triggerData).toMatchObject({ doc: { orderNumber: order.orderNumber } })
+      expect(JSON.stringify(runs[0])).not.toContain(order.accessToken)
+      const { docs: jobs } = await payload.find({ collection: 'payload-jobs', limit: 200 })
+      expect(JSON.stringify(jobs)).not.toContain(order.accessToken)
       expect(runs[0].stepResults?.map((step) => step.status)).toEqual(Array(4).fill('succeeded'))
 
       const { docs: log } = await payload.find({

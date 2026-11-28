@@ -16,7 +16,7 @@ import { getPayloadClient } from '@/lib/payload'
 import { getOrderForVisitor, includedVat, orderLineLabel, SHIPPING_COUNTRIES } from '@/lib/shop'
 import type { Order } from '@/payload-types'
 
-// The URL can carry the order's token, so it is never sent on to other sites as a referrer.
+// The URL can carry the order's access token, so it is never sent on to other sites as a referrer.
 export const metadata: Metadata = {
   title: 'Your order',
   robots: { index: false },
@@ -34,10 +34,10 @@ const HEADINGS: Record<Order['status'], string> = {
 
 /**
  * An order's confirmation and status page, and where the payment provider sends the customer
- * back to. It is shown to whoever holds the order's token (`?t=…`, which is how a guest gets back
- * to it), to the signed-in member who placed it and to admins; everyone else gets a 404, the
- * same as for an order number that does not exist. While the payment is still open the page
- * polls, like /checkout/return does for bookings.
+ * back to. It is shown to whoever holds the order's access token (`?t=…`, which is how a guest
+ * gets back to it), to the signed-in member who placed it and to admins; everyone else gets a
+ * 404, the same as for an order number that does not exist. While the payment is still open the
+ * page polls, like /checkout/return does for bookings.
  */
 export default async function OrderPage({
   params,

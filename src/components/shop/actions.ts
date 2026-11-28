@@ -137,7 +137,7 @@ export async function placeOrderAction(
 
 /**
  * Puts a cancelled order's items back in the visitor's cart (after a payment that did not go
- * through) and opens the cart. The order is named by its number plus its token, or belongs to the
+ * through) and opens the cart. The order is named by its number plus its access token, or belongs to the
  * signed-in member; see `getOrderForVisitor`.
  */
 export async function restoreCartAction(formData: FormData): Promise<void> {

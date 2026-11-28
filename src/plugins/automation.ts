@@ -9,12 +9,19 @@ import {
   UpdateDocumentStepTask,
   workflowsPlugin,
 } from '@xtr-dev/payload-automation/server'
-import type { CollectionConfig, Endpoint, JobsConfig, Plugin } from 'payload'
+import type {
+  CollectionBeforeChangeHook,
+  CollectionConfig,
+  Endpoint,
+  JobsConfig,
+  Plugin,
+} from 'payload'
 
 import { anyone, isAdmin, isAdminField } from '@/access'
 import { AUTOMATION_QUEUE, automationWorkflows, DEV_WEBHOOK_SECRET } from '@/seed/automation'
 
 import { CancelStaleOrdersStepTask } from './ecommerce'
+import { extendCollection } from './utils'
 
 /**
  * @xtr-dev/payload-automation
@@ -193,6 +200,45 @@ const automationJobs: Plugin = (config) => {
   }
 }
 
+/**
+ * Field names whose values are left out of everything stored on a workflow run. `accessToken` is
+ * a shop order's secret: whoever has it can open the order without signing in, and the ecommerce
+ * plugin hides it from the API and the admin panel for everyone.
+ */
+const RUN_SECRET_KEYS = new Set(['accessToken'])
+
+/** A copy of `value` without the RUN_SECRET_KEYS, at any depth. */
+const withoutRunSecrets = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(withoutRunSecrets)
+  // Only plain objects are walked; a Date or other class instance is stored as it is.
+  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
+    return value
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !RUN_SECRET_KEYS.has(key))
+      .map(([key, child]) => [key, withoutRunSecrets(child)]),
+  )
+}
+
+/**
+ * A run stores a snapshot of what triggered it, and for the "Shop order paid" workflow that is
+ * the order as the hook received it from server code: with its access token. Runs can be read by
+ * admins in the panel and through the API, where the order itself never shows the token, so it
+ * is removed before a run is written. The workflow's steps read the hook's own copy while they
+ * run and do not use the token; a run that is retried from its snapshot works without it too.
+ */
+const stripRunSecrets: CollectionBeforeChangeHook = ({ data }) =>
+  withoutRunSecrets(data) as typeof data
+
+const keepOrderTokensOutOfRuns = extendCollection('workflow-runs', (collection) => ({
+  ...collection,
+  hooks: {
+    ...collection.hooks,
+    beforeChange: [...(collection.hooks?.beforeChange ?? []), stripRunSecrets],
+  },
+}))
+
 export const automation: Plugin[] = [
   studioLogPlugin,
   pagerUrlPlugin,
@@ -215,5 +261,6 @@ export const automation: Plugin[] = [
     // Look for due scheduled triggers every minute, on the queue automationJobs runs.
     scheduledTriggers: { tick: '* * * * *', queue: AUTOMATION_QUEUE },
   }),
+  keepOrderTokensOutOfRuns,
   automationJobs,
 ]

@@ -1,23 +1,15 @@
 import {
   getEcommerce,
+  getOrderRejection,
   isSameCartLine,
   resolveUnitPrice,
-  type RefusedCouponResult,
+  type CouponRefusalReason,
+  type OrderRejection,
 } from '@xtr-dev/payload-ecommerce'
 import { sendEmail } from '@xtr-dev/payload-mailing'
-import { createHmac, timingSafeEqual } from 'crypto'
 import type { Payload, PayloadRequest } from 'payload'
 
-import type {
-  Category,
-  Coupon,
-  Email,
-  Media,
-  Notification,
-  Order,
-  Product,
-  User,
-} from '@/payload-types'
+import type { Category, Email, Media, Notification, Order, Product, User } from '@/payload-types'
 import { checkoutProvider } from '@/plugins/billing'
 
 import { paymentLink, siteOrigin } from './checkout'
@@ -36,7 +28,7 @@ import { notifyMember } from './notifications'
  *
  * Checkout (`placeOrder`) creates the order from that cart with the plugin, which prices the lines
  * and applies the coupon itself, and then starts a payment through @xtr-dev/payload-billing. A
- * guest reaches their order afterwards with a signed token in the order page's URL.
+ * guest reaches their order afterwards with the order's access token in the order page's URL.
  *
  * Once an order is paid its customer gets a confirmation email, a member is told in their inbox
  * when it ships, and orders left unpaid are cancelled by `cancelStaleOrders`; the hooks and the
@@ -376,9 +368,10 @@ export const normaliseCouponCode = (value: unknown): string | null => {
 /**
  * Why a coupon code was refused, in the shop's own words. The plugin reports the first of its
  * rules that failed as `reason`, with the coupon's minimum amount when that is what was missed;
- * its `error` text is meant for logs.
+ * its `error` text is meant for logs. It gives the same two values when it validates a code for a
+ * quote and when it rejects an order for its coupon, so both are worded here.
  */
-const couponRefusal = (refusal: RefusedCouponResult<Coupon>): string => {
+const couponRefusal = (refusal: { reason: CouponRefusalReason; minPurchase?: number }): string => {
   switch (refusal.reason) {
     case 'not_found':
       return 'We don’t know that code.'
@@ -532,35 +525,28 @@ const validateCheckout = (
 }
 
 /**
- * The token that lets whoever holds it see one order: an HMAC of the order number under the
- * Payload secret. It is put in the order page's URL (`/shop/orders/ORD-…?t=…`) for the customer
- * who placed the order, so a guest can come back to it, and it cannot be worked out from the
- * order number alone.
+ * The order page's path with the order's access token as `?t=…`, which is what lets a guest open
+ * the page. The token is a random secret the plugin generates per order and only returns to server
+ * code, so pass an order that was read there (the Local API's default full access), and only hand
+ * the result to the order's own customer. An order without a token gets the bare path, which
+ * still works for the signed-in member who placed it.
  */
-export const orderToken = (payload: Payload, orderNumber: string): string =>
-  createHmac('sha256', payload.secret)
-    .update(`shop-order:${orderNumber}`)
-    .digest('hex')
-    .slice(0, 40)
-
-const isOrderToken = (payload: Payload, orderNumber: string, token: unknown): boolean => {
-  if (typeof token !== 'string' || !/^[0-9a-f]{40}$/.test(token)) return false
-  return timingSafeEqual(Buffer.from(token), Buffer.from(orderToken(payload, orderNumber)))
-}
-
-/** The order page's path including its token. Only hand this to the order's own customer. */
-export const orderPath = (payload: Payload, order: Pick<Order, 'orderNumber'>): string => {
-  const number = order.orderNumber ?? ''
-  return `/shop/orders/${encodeURIComponent(number)}?t=${orderToken(payload, number)}`
+export const orderPath = (order: Pick<Order, 'orderNumber' | 'accessToken'>): string => {
+  const path = `/shop/orders/${encodeURIComponent(order.orderNumber ?? '')}`
+  return order.accessToken ? `${path}?t=${encodeURIComponent(order.accessToken)}` : path
 }
 
 const relId = (value: unknown): number | undefined =>
   value && typeof value === 'object' ? (value as { id: number }).id : (value as number | undefined)
 
 /**
- * The order with this number, but only for someone allowed to see it: the holder of its token,
- * the signed-in member who placed it, or an admin. Anyone else gets null, exactly as for an
+ * The order with this number, but only for someone allowed to see it: the holder of its access
+ * token, the signed-in member who placed it, or an admin. Anyone else gets null, exactly as for an
  * order number that does not exist, so order numbers cannot be probed.
+ *
+ * The token is checked by the plugin (`getOrderByToken`), which compares it in constant time and
+ * refuses a missing or malformed one. The returned document contains the token, so it is for
+ * server-side rendering only and must not be sent to a browser as a whole.
  */
 export const getOrderForVisitor = async (
   payload: Payload,
@@ -568,6 +554,9 @@ export const getOrderForVisitor = async (
   { token, user }: { token?: unknown; user?: Pick<User, 'id' | 'role'> | null },
 ): Promise<Order | null> => {
   if (typeof orderNumber !== 'string' || !/^[A-Za-z0-9-]{1,60}$/.test(orderNumber)) return null
+  const byToken = await getEcommerce(payload).orders.getOrderByToken({ orderNumber, token })
+  if (byToken) return byToken
+  if (!user) return null
   const { docs } = await payload.find({
     collection: 'orders',
     where: { orderNumber: { equals: orderNumber } },
@@ -576,10 +565,7 @@ export const getOrderForVisitor = async (
   })
   const order = docs[0]
   if (!order) return null
-  const allowed =
-    isOrderToken(payload, orderNumber, token) ||
-    (!!user && (user.role === 'admin' || relId(order.user) === user.id))
-  return allowed ? order : null
+  return user.role === 'admin' || relId(order.user) === user.id ? order : null
 }
 
 /** "Speckled mug (Cobalt)" for an order line, from its populated product. */
@@ -623,7 +609,7 @@ export const beginOrderCheckout = async ({
   user?: Pick<User, 'id'> | null
 }): Promise<{ redirectTo: string }> => {
   const order = await payload.findByID({ collection: 'orders', id: placed.id, depth: 1 })
-  const page = orderPath(payload, order)
+  const page = orderPath(order)
 
   // Nothing to pay (a coupon covered everything): payments must be at least one cent.
   if (!order.total) {
@@ -685,6 +671,43 @@ export const beginOrderCheckout = async ({
 }
 
 /**
+ * Why the plugin refused to create an order, in the shop's own words. The cart was checked just
+ * before, so this is what a customer sees when the stock or the coupon changed in between: another
+ * order took the last units or the coupon's last use.
+ *
+ * A stock rejection names the product by id; its title and glaze come from the cart's lines. The
+ * number left is only mentioned when the plugin reports one, which it does not when the units
+ * were lost to an order placed at the same moment.
+ */
+export const orderRefusal = (
+  rejection: OrderRejection,
+  lines: Pick<CartLine, 'product' | 'variant'>[] = [],
+): string => {
+  if (rejection.type === 'coupon') {
+    return `Your discount code wasn’t applied. ${couponRefusal(rejection)}`
+  }
+  const ofProduct = lines.filter((line) => String(line.product.id) === String(rejection.product))
+  // A variant is only named on the rejection when it keeps its own stock; otherwise the product's
+  // shared stock is short and the product is named without a glaze.
+  const line = rejection.variant
+    ? ofProduct.find((candidate) => candidate.variant === rejection.variant)
+    : ofProduct[0]
+  const title = line?.product.title ?? ofProduct[0]?.product.title
+  const name = title
+    ? rejection.variant
+      ? `“${title} (${rejection.variant})”`
+      : `“${title}”`
+    : 'one of your items'
+  const left = rejection.available
+  if (left === undefined) {
+    return `Someone just bought the last of ${name}. Check your cart and try again.`
+  }
+  return left > 0
+    ? `We only have ${left} of ${name} left. Change the quantity in your cart and try again.`
+    : `We just sold the last of ${name}. Remove it from your cart and try again.`
+}
+
+/**
  * Checkout: turns this session's cart into an order and starts its payment.
  *
  * The browser supplies an address, an email (guests only) and optionally a coupon code; nothing
@@ -742,11 +765,10 @@ export const placeOrder = async (
     })
   } catch (error) {
     // The plugin's own refusals (someone else just bought the last one, the coupon ran out) are
-    // written for customers; anything else is logged and kept vague.
-    const reason = error instanceof Error ? error.message : ''
-    if (/^Not enough stock|^Coupon/.test(reason)) {
-      throw new ShopError(`${reason}. Check your cart and try again.`)
-    }
+    // something the customer can act on, so they are told which; anything else is logged and
+    // kept vague.
+    const rejection = getOrderRejection(error)
+    if (rejection) throw new ShopError(orderRefusal(rejection, cart.lines))
     payload.logger.error({ err: error }, 'Shop order could not be created')
     throw new ShopError('We couldn’t place your order. Please try again.')
   }
@@ -791,8 +813,9 @@ export const restoreCartFromOrder = async (
 /**
  * Sends the order confirmation, rendered from the `order-confirmation` template, to the email on
  * the order (the member's, or the one a guest gave at checkout). The link in it carries the
- * order's token. Goes out on the priority mail queue, like booking confirmations. Returns the
- * queued `emails` document.
+ * order's access token, read here with full access rather than taken from the caller's copy of
+ * the order, which lacks it when it came through the API. Goes out on the priority mail queue,
+ * like booking confirmations. Returns the queued `emails` document.
  */
 export const sendOrderConfirmation = async (
   payload: Payload,
@@ -816,7 +839,7 @@ export const sendOrderConfirmation = async (
         preheader: `Order ${doc.orderNumber} is paid. We are wrapping it now.`,
         firstName: address?.firstName ?? 'there',
         orderNumber: doc.orderNumber,
-        orderToken: orderToken(payload, doc.orderNumber),
+        orderToken: doc.accessToken ?? '',
         items: doc.items.map((item) => `${item.quantity} × ${orderLineLabel(item)}`).join(', '),
         // In euros: the template formats them with the plugin's `formatCurrency` filter.
         shipping: (doc.shipping ?? 0) / 100,
@@ -875,7 +898,7 @@ export const sendOrderShipped = async (
         preheader: `Order ${doc.orderNumber} has left the studio.`,
         firstName: address?.firstName ?? 'there',
         orderNumber: doc.orderNumber,
-        orderToken: orderToken(payload, doc.orderNumber),
+        orderToken: doc.accessToken ?? '',
         trackingNumber: doc.trackingNumber ?? '',
         items: doc.items.map((item) => `${item.quantity} × ${orderLineLabel(item)}`).join(', '),
         shipTo: [
