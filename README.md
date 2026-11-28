@@ -22,6 +22,12 @@ On the first `pnpm dev`, the empty SQLite database (`kiln.db`) is seeded automat
 prompt or fail, delete `kiln.db*` (the database and its write-ahead log, `kiln.db-wal` and
 `kiln.db-shm`) and run `pnpm seed`.
 
+`.env.example` sets `SQLITE_SYNCHRONOUS=NORMAL`, which is how the demo runs. SQLite then syncs to
+disk at checkpoints of its write-ahead log instead of on every write. Writes are much faster on a
+slow disk and a crash cannot corrupt the database, but a power cut can lose the last few writes,
+such as an order that was just confirmed. Without the variable the site uses `FULL`, which syncs
+every write. Use `FULL` for a site with real orders and payments.
+
 ## Seeded logins (development only)
 
 | Role   | Email             | Password      |
