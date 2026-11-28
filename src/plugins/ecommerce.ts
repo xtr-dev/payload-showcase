@@ -8,6 +8,7 @@ import {
   cancelStaleOrders,
   notifyOrderShipped,
   sendOrderConfirmation,
+  sendOrderShipped,
   STALE_ORDER_MINUTES,
 } from '@/lib/shop'
 import type { Order, Payment } from '@/payload-types'
@@ -34,7 +35,8 @@ import { addFields, extendCollection } from './utils'
  *   fails, `refunded` on a full refund). The plugin puts stock and the coupon use back whenever an
  *   order becomes cancelled or refunded.
  * - Tie-ins with the other plugins hang off the order's own status: a paid order is confirmed by
- *   email (mailing), a shipped one is announced in the member's inbox (notifications), and two
+ *   email (mailing), a shipped one is announced by email and in the member's inbox
+ *   (notifications), and two
  *   automation workflows (src/seed/automation.ts) log paid orders with a low-stock warning and
  *   release orders that were never paid.
  */
@@ -136,10 +138,13 @@ const hasConfirmation = async (payload: Payload, orderId: number): Promise<boole
  * matter who made them (the payment sync, an admin, a workflow):
  *
  * - `paymentStatus` becomes `paid`: the confirmation email, to members and guests alike.
- * - `status` becomes `shipped`: an inbox notification for the member (guests have no inbox).
+ * - `status` becomes `shipped`: the shipped email, to members and guests alike, and an inbox
+ *   notification for the member (guests have no inbox, so the email is all they get).
  *
  * This is the site's own hook rather than the plugin's `afterCreateOrder`, which runs before
- * payment and fails the order when it throws. Problems here are logged and never block the order.
+ * payment and fails the order when it throws. Problems here are logged and never block the order,
+ * and each message is attempted on its own, so a mail failure does not cost the member their
+ * notification.
  * Set `context: { skipMail: true }` or `{ skipNotifications: true }` on a write to stay quiet.
  */
 const orderMessages: CollectionAfterChangeHook<Order> = async ({
@@ -150,21 +155,25 @@ const orderMessages: CollectionAfterChangeHook<Order> = async ({
 }) => {
   const { payload, context } = req
   const was = operation === 'create' ? undefined : previousDoc
-  try {
-    if (
-      !context.skipMail &&
-      doc.paymentStatus === 'paid' &&
-      was?.paymentStatus !== 'paid' &&
-      doc.customerEmail &&
-      !(await hasConfirmation(payload, doc.id))
-    ) {
-      await sendOrderConfirmation(payload, doc)
+  const attempt = async (what: string, send: () => Promise<unknown>): Promise<void> => {
+    try {
+      await send()
+    } catch (error) {
+      payload.logger.error({ err: error, msg: `${what} for order ${doc.orderNumber} failed` })
     }
-    if (!context.skipNotifications && doc.status === 'shipped' && was?.status !== 'shipped') {
-      await notifyOrderShipped(payload, doc, { req })
-    }
-  } catch (error) {
-    payload.logger.error({ err: error, msg: `Messages for order ${doc.orderNumber} failed` })
+  }
+  const paid = doc.paymentStatus === 'paid' && was?.paymentStatus !== 'paid'
+  const shipped = doc.status === 'shipped' && was?.status !== 'shipped'
+  if (!context.skipMail && paid && doc.customerEmail) {
+    await attempt('Confirmation email', async () => {
+      if (!(await hasConfirmation(payload, doc.id))) await sendOrderConfirmation(payload, doc)
+    })
+  }
+  if (!context.skipMail && shipped && doc.customerEmail) {
+    await attempt('Shipped email', () => sendOrderShipped(payload, doc))
+  }
+  if (!context.skipNotifications && shipped) {
+    await attempt('Shipped notification', () => notifyOrderShipped(payload, doc, { req }))
   }
   return doc
 }
