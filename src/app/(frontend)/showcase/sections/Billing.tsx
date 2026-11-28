@@ -68,7 +68,9 @@ export const BillingShowcase = async () => {
       intro="Every workshop seat and membership goes through a real checkout, with payments, invoices and refunds tracked in Payload."
       features={[
         'Local test provider out of the box; Mollie with an API key, Stripe webhooks with a Stripe key',
-        'An invoice and a payment for each booking and membership month',
+        'An invoice and a payment for each booking, membership month and shop order',
+        'Shop invoices list the items at their normal prices, with a coupon as the invoice’s discount',
+        'Guest invoices carry the name and email from checkout; a member’s are copied from their account',
         'A return page that finds the payment by its return token',
         'Admin refunds that release the seat back to the session',
         'Members see only their own payments and invoices',

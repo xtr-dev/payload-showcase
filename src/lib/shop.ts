@@ -1,16 +1,14 @@
 import {
+  getEcommerce,
   isSameCartLine,
   resolveUnitPrice,
-  // The plugin's server helpers are named like a React hook; the alias keeps the
-  // react-hooks lint rule from treating these plain server functions as components.
-  useEcommerce as ecommerceHelpers,
+  type RefusedCouponResult,
 } from '@xtr-dev/payload-ecommerce'
 import { sendEmail } from '@xtr-dev/payload-mailing'
 import { createHmac, timingSafeEqual } from 'crypto'
 import type { Payload, PayloadRequest } from 'payload'
 
 import type {
-  Cart,
   Category,
   Coupon,
   Email,
@@ -108,7 +106,7 @@ export const getStock = async (
   payload: Payload,
   product: Product,
 ): Promise<Record<string, Stock>> => {
-  const { products } = ecommerceHelpers(payload)
+  const { products } = getEcommerce(payload)
   const names = product.variants?.length ? product.variants.map((v) => v.name) : ['']
   const threshold = product.inventory?.lowStockThreshold ?? 0
   const entries = await Promise.all(
@@ -172,8 +170,8 @@ const EMPTY_CART: CartView = { id: null, lines: [], subtotal: 0, count: 0, block
  * was deleted are dropped from the cart, since they can be neither shown nor ordered.
  */
 export const getCartView = async (payload: Payload, sessionId: string): Promise<CartView> => {
-  const { cart: carts } = ecommerceHelpers(payload)
-  const cart = (await carts.getCart(undefined, sessionId)) as Cart | null
+  const { cart: carts } = getEcommerce(payload)
+  const cart = await carts.getCart(undefined, sessionId)
   if (!cart?.items?.length) return cart ? { ...EMPTY_CART, id: cart.id } : EMPTY_CART
 
   const items = cart.items.filter((item) => item.product && typeof item.product === 'object')
@@ -288,7 +286,7 @@ const assertOrderable = async (
   if (quantity > MAX_LINE_QUANTITY) {
     throw new ShopError(`You can order up to ${MAX_LINE_QUANTITY} of one item.`)
   }
-  const { products } = ecommerceHelpers(payload)
+  const { products } = getEcommerce(payload)
   const stock = await products.checkInventory(product.id, quantity, variant ?? undefined)
   if (!stock.available) {
     throw new ShopError(
@@ -311,8 +309,8 @@ export const addToCart = async (
   }
   const { product, variant } = await resolveLine(payload, input)
 
-  const { cart: carts } = ecommerceHelpers(payload)
-  const cart = (await carts.getCart(undefined, sessionId)) as Cart | null
+  const { cart: carts } = getEcommerce(payload)
+  const cart = await carts.getCart(undefined, sessionId)
   const inCart =
     cart?.items?.find((item) => isSameCartLine(item, product.id, variant))?.quantity ?? 0
   await assertOrderable(payload, product, variant, inCart + quantity)
@@ -339,8 +337,8 @@ export const setCartLineQuantity = async (
   const productId = toInteger(input.productId)
   const variant = typeof input.variant === 'string' && input.variant ? input.variant : null
 
-  const { cart: carts } = ecommerceHelpers(payload)
-  const cart = (await carts.getCart(undefined, sessionId)) as Cart | null
+  const { cart: carts } = getEcommerce(payload)
+  const cart = await carts.getCart(undefined, sessionId)
   const line = cart?.items?.find((item) => isSameCartLine(item, productId, variant))
   if (!cart || !line || !productId) throw new ShopError('That item is not in your cart.')
 
@@ -376,19 +374,45 @@ export const normaliseCouponCode = (value: unknown): string | null => {
 }
 
 /**
+ * Why a coupon code was refused, in the shop's own words. The plugin reports the first of its
+ * rules that failed as `reason`, with the coupon's minimum amount when that is what was missed;
+ * its `error` text is meant for logs.
+ */
+const couponRefusal = (refusal: RefusedCouponResult<Coupon>): string => {
+  switch (refusal.reason) {
+    case 'not_found':
+      return 'We don’t know that code.'
+    case 'customer_required':
+      // A per-customer limit is counted over the customer's orders, which a guest has none of.
+      return 'Sign in to use this code: it works once per customer.'
+    case 'customer_limit':
+      return 'You have already used this code.'
+    case 'min_purchase':
+      return `This code works from ${formatPrice(refusal.minPurchase ?? 0)}.`
+    case 'expired':
+      return 'This code has expired.'
+    case 'not_yet_valid':
+      return 'This code isn’t valid yet.'
+    case 'usage_limit':
+      return 'This code has been used as often as it could be.'
+    case 'not_applicable':
+      return 'This code doesn’t apply to anything in your cart.'
+    case 'inactive':
+      return 'This code can’t be used right now.'
+  }
+}
+
+/**
  * What an order for this cart would cost, with an optional coupon code checked by the plugin for
  * this cart and customer. The order created at checkout runs the same coupon rules again, so a
  * quote is a preview and never the source of an order's amounts.
- *
- * The plugin enforces a coupon's per-customer limit by counting the customer's orders, which it
- * cannot do for a guest. Such a coupon is therefore only accepted from a signed-in member.
  */
 export const quoteCart = async (
   payload: Payload,
   cart: Pick<CartView, 'lines' | 'subtotal'>,
   { couponCode, user }: { couponCode?: string | null; user?: Pick<User, 'id'> | null } = {},
 ): Promise<Quote> => {
-  const { coupons, orders } = ecommerceHelpers(payload)
+  const { coupons, orders } = getEcommerce(payload)
   const subtotal = cart.subtotal
   let shipping = shippingFor(subtotal)
   let discount = 0
@@ -397,11 +421,9 @@ export const quoteCart = async (
 
   if (couponCode) {
     const code = normaliseCouponCode(couponCode)
-    const found = code ? ((await coupons.findCouponByCode(code)) as Coupon | null) : null
-    if (!code || !found) {
+    if (!code) {
+      // Not something a code can look like, so it is never sent to the database.
       couponError = 'We don’t know that code.'
-    } else if (found.customerLimit && !user) {
-      couponError = 'Sign in to use this code: it works once per customer.'
     } else {
       const categoryIds = cart.lines.flatMap((line) =>
         (line.product.categories ?? []).map((c) => (typeof c === 'object' ? c.id : c)),
@@ -417,12 +439,8 @@ export const quoteCart = async (
         discount = result.discount
         if (result.freeShipping) shipping = 0
         coupon = { code, freeShipping: result.freeShipping }
-      } else if (found.minPurchase && subtotal < found.minPurchase) {
-        couponError = `This code works from ${formatPrice(found.minPurchase)}.`
-      } else if (result.error === 'Customer usage limit reached') {
-        couponError = 'You have already used this code.'
       } else {
-        couponError = 'This code can’t be used right now.'
+        couponError = couponRefusal(result)
       }
     }
   }
@@ -571,9 +589,9 @@ export const orderLineLabel = (item: Order['items'][number]): string => {
 }
 
 /**
- * Invoice lines that add up to the order's total. Billing invoice lines cannot be negative, so
- * an order with a discount is invoiced as one goods line at the discounted amount, with the
- * items and the discount spelled out in its description. Amounts include VAT, like every invoice
+ * The order's lines at their normal prices, plus shipping, as invoice lines. A coupon's discount
+ * is not a line (invoice lines cannot be negative): it goes on the invoice as `discountAmount`,
+ * which the billing plugin takes off the lines' subtotal. Amounts include VAT, like every invoice
  * on the site.
  */
 const invoiceItems = (order: Order) => {
@@ -582,21 +600,10 @@ const invoiceItems = (order: Order) => {
     quantity: item.quantity,
     unitAmount: item.price,
   }))
-  const discount = order.discount ?? 0
-  const lines =
-    discount > 0
-      ? [
-          {
-            description: `${goods.map((g) => `${g.quantity} × ${g.description}`).join(', ')}, less ${formatPrice(discount)} discount`,
-            quantity: 1,
-            unitAmount: order.subtotal - discount,
-          },
-        ]
-      : goods
   const shipping = order.shipping ?? 0
   return shipping > 0
-    ? [...lines, { description: 'Shipping', quantity: 1, unitAmount: shipping }]
-    : lines
+    ? [...goods, { description: 'Shipping', quantity: 1, unitAmount: shipping }]
+    : goods
 }
 
 /**
@@ -632,14 +639,21 @@ export const beginOrderCheckout = async ({
   const invoice = await payload.create({
     collection: 'invoices',
     data: {
-      customer: user?.id,
-      // A member's name and email are filled in from their account (src/plugins/billing.ts).
-      customerInfo: user
-        ? undefined
-        : { name: `${address?.firstName} ${address?.lastName}`, email: order.customerEmail },
+      // A member's name and email are copied from their account by the billing plugin's
+      // `customerInfoExtractor` (src/plugins/billing.ts). A guest has no account, so the invoice
+      // has no customer and carries the name and email given at checkout.
+      ...(user
+        ? { customer: user.id }
+        : {
+            customerInfo: {
+              name: `${address?.firstName} ${address?.lastName}`,
+              email: order.customerEmail,
+            },
+          }),
       currency: 'EUR',
       status: 'open',
       items: invoiceItems(order),
+      discountAmount: order.discount ?? 0,
       notes: `Shop order ${order.orderNumber}`,
       metadata: { order: order.orderNumber },
     },
@@ -705,10 +719,10 @@ export const placeOrder = async (
     data: { user: user?.id ?? null },
   })
 
-  const { orders } = ecommerceHelpers(payload)
+  const { orders } = getEcommerce(payload)
   let order: Order
   try {
-    order = (await orders.createOrderFromCart({
+    order = await orders.createOrderFromCart({
       cartId: cart.id,
       orderData: {
         customerEmail: form.email,
@@ -725,7 +739,7 @@ export const placeOrder = async (
         couponCode: quote.coupon?.code,
         paymentMethod: checkoutProvider(),
       },
-    })) as Order
+    })
   } catch (error) {
     // The plugin's own refusals (someone else just bought the last one, the coupon ran out) are
     // written for customers; anything else is logged and kept vague.
@@ -925,7 +939,7 @@ export const cancelStaleOrders = async (
   payload: Payload,
   { olderThanMinutes = STALE_ORDER_MINUTES, now = new Date() } = {},
 ): Promise<string[]> => {
-  const { orders } = ecommerceHelpers(payload)
+  const { orders } = getEcommerce(payload)
   const { docs } = await payload.find({
     collection: 'orders',
     where: {

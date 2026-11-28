@@ -5,6 +5,7 @@
 ```
 src/
   payload.config.ts          collections, globals, plugins, onInit (auto-seed)
+  instrumentation.ts         boots Payload with its job crons when the Next.js server starts
   access/                    shared access helpers (isAdmin, adminOrSelf, publishedOrAdmin, ...)
   collections/               Users, Media, Workshops, Sessions, Bookings, MembershipPlans
   globals/                   Home (homepage content, incl. hero variant B), SiteSettings
@@ -42,7 +43,10 @@ tests/
 - Globals: **home**, **site-settings**.
 
 There are no migrations. The schema is pushed in development/test (`pnpm seed`, `pnpm dev`, Vitest).
-E2E and CI seed the database in development mode first, then run `next start` against it.
+E2E and CI seed the database in development mode first, then run `next start` against it. A plugin
+upgrade that adds a column (billing 0.7 added `discount_amount` to invoices, automation 0.6
+`discard_run_when` to workflows) therefore needs no step here; a deployment that keeps its
+database would need a migration for it.
 
 ## Per-plugin extension points
 
@@ -102,6 +106,9 @@ file, keep it minimal and mention it in your PR.
   provider returns the visitor to `/checkout/return?t={returnToken}`; a payments `afterChange`
   hook marks the booking paid (or activates the membership) and, on a full refund, refunded.
 - Every frontend route is dynamic (`force-dynamic` in the layout).
+- Jobs: `src/instrumentation.ts` loads Payload with `cron: true` when the server starts, so the
+  `jobs.autoRun` crons (mail queues, billing refunds, the automation scheduler) run from boot and
+  not from the first visit. `DISABLE_JOBS_AUTORUN=true` turns them off.
 
 ## Shop
 
@@ -121,12 +128,17 @@ storefront does. Its server actions (`src/components/shop/actions.ts`) and pages
 - **Totals.** Prices include VAT, so no `calculateTax` hook is set and an order's `tax` is 0; pages
   show "incl. 21% VAT". Shipping is the site's: €6.95, free from €75 (`shippingFor`). A coupon code
   is previewed with the plugin's `validateCoupon` (`quoteCart`) and applied by the plugin when the
-  order is created. A once-per-customer code is only accepted from a signed-in member.
+  order is created. A refusal carries a `reason` (`expired`, `min_purchase`, `customer_limit`, …),
+  which `couponRefusal` turns into the shop's own message. A once-per-customer code needs a
+  signed-in member: the plugin refuses it for a guest with `customer_required`.
 - **Checkout.** `/shop/checkout` → `placeOrder`: validates the address (and a guest's email), sets
   the cart's `user` to the signed-in member or nobody, and calls `createOrderFromCart`, which
   prices the lines, applies the coupon and takes the stock. `beginOrderCheckout` then creates an
   open invoice and a payment with an `order` relationship and sends the visitor to the provider.
-  Invoice lines cannot be negative, so a discounted order is invoiced as one goods line.
+  The invoice lists the order's lines at their normal prices plus shipping; a coupon's discount is
+  the invoice's `discountAmount`, so `amount` (subtotal − discount) equals the order's total. A
+  member's invoice gets their name and email from billing's `customerInfoExtractor`; a guest's has
+  no `customer` and carries the name and email given at checkout.
 - **Payment sync.** `syncOrder` (a payments `afterChange` hook in `src/plugins/ecommerce.ts`) maps
   the payment to the order: succeeded → `processing` / `paid`; failed or cancelled → `cancelled`;
   fully refunded → `refunded`. The plugin restocks and gives the coupon use back on cancel and
@@ -140,8 +152,9 @@ storefront does. Its server actions (`src/components/shop/actions.ts`) and pages
   `customerEmail`, so guests get it too) and notifies the member on the `orders` channel. Each goes
   out once per order.
   Two workflows in `src/seed/automation.ts` use the shop: "Shop order paid" (studio log, low-stock
-  warning to the admin) and "Release unpaid orders" (every 15 minutes, a custom step that cancels
-  orders left unpaid for 30 minutes so their stock goes back on sale).
+  warning to the admin) and "Release unpaid orders" (every minute, a custom step that cancels
+  orders left unpaid for 30 minutes so their stock goes back on sale; its `discardRunWhen` keeps
+  the minutes in which nothing was released out of the run history).
 
 ## Design system
 

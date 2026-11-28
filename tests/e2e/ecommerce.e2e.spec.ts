@@ -213,22 +213,29 @@ test.describe('Shop (payload-ecommerce)', () => {
     await page.goto('/shop/breakfast-bowl')
     await addToCart(page, { quantity: 3 })
     await page.goto('/shop/cart')
-    // 3 × €34 = €102: free shipping.
+    // 3 × €34 = €102: free shipping. WELCOME10 takes €10.20 off.
+    await page.getByLabel('Discount code').fill('WELCOME10')
+    await page.getByRole('button', { name: 'Apply' }).click()
+    await expect(page.getByTestId('coupon-applied')).toBeVisible()
     await page.getByRole('link', { name: 'Checkout' }).click()
     await expect(page.getByText(/Signed in as e2e-/)).toBeVisible()
     const form = page.getByTestId('checkout-form')
     await expect(form.getByLabel('Email')).toHaveCount(0)
     await expect(form.getByLabel('First name')).toHaveValue('Noor')
     await fillDelivery(page)
-    await page.getByRole('button', { name: 'Pay €102' }).click()
+    await page.getByRole('button', { name: 'Pay €91.80' }).click()
     await payOnTestProvider(page, 'instant-success')
     await expect(page.getByTestId('order-heading')).toHaveText('Thank you, your order is in!')
     const number = (await page.getByTestId('order-number').textContent())!.trim()
 
     await page.getByRole('link', { name: 'View invoice' }).click()
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^INV-\d+$/)
-    await expect(page.getByRole('article')).toContainText('Breakfast bowl')
-    await expect(page.getByRole('article')).toContainText('Noor Winkel')
+    const invoice = page.getByRole('article')
+    await expect(invoice).toContainText('Noor Winkel')
+    // The line keeps its normal price; the coupon is the invoice's discount.
+    await expect(invoice.getByRole('row', { name: /Breakfast bowl/ })).toContainText('€102')
+    await expect(invoice.getByTestId('invoice-discount')).toContainText('−€10.20')
+    await expect(invoice.getByRole('row', { name: /Total/ })).toContainText('€91.80')
 
     await page.goto('/account')
     const orders = page.getByTestId('orders')

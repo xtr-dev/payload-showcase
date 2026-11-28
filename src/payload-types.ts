@@ -470,11 +470,11 @@ export interface Invoice {
    */
   number?: string | null;
   /**
-   * Link to customer record (optional)
+   * Link to customer record (optional when the customer name and email are filled in)
    */
   customer?: (number | null) | User;
   /**
-   * Customer billing information
+   * Customer billing information (auto-populated when a customer is selected; an invoice without a customer keeps the name and email it was created with)
    */
   customerInfo?: {
     /**
@@ -499,7 +499,7 @@ export interface Invoice {
     taxId?: string | null;
   };
   /**
-   * Billing address
+   * Billing address (auto-populated when a customer is selected)
    */
   billingAddress?: {
     /**
@@ -547,11 +547,15 @@ export interface Invoice {
    */
   subtotal?: number | null;
   /**
+   * Discount in cents, subtracted from the subtotal. Cannot exceed the subtotal
+   */
+  discountAmount?: number | null;
+  /**
    * Tax amount in cents
    */
   taxAmount?: number | null;
   /**
-   * Total amount (subtotal + tax)
+   * Total amount (subtotal − discount + tax)
    */
   amount?: number | null;
   dueDate?: string | null;
@@ -1321,6 +1325,10 @@ export interface Workflow {
    * Maximum duration of a whole run in milliseconds, including retries and the waits between them (0 or empty for no limit). When it passes, the run fails with "Workflow timed out", whatever the error handling setting: steps still running are recorded as failed, no further step or retry starts. A step that is already running is not interrupted, only its result is discarded.
    */
   timeout?: number | null;
+  /**
+   * JSONata expression evaluated when a run finishes without a failed step. When it is true, the run is deleted instead of kept in the run history. Use it for workflows that often have nothing to do, such as a schedule that polls for work. Leave empty to keep every run. Failed runs, and runs with a failed step, are always kept. Example: $count(steps.find.output.docs) = 0
+   */
+  discardRunWhen?: string | null;
   updatedAt: string;
   createdAt: string;
   _status?: ('draft' | 'published') | null;
@@ -2338,6 +2346,7 @@ export interface InvoicesSelect<T extends boolean = true> {
         id?: T;
       };
   subtotal?: T;
+  discountAmount?: T;
   taxAmount?: T;
   amount?: T;
   dueDate?: T;
@@ -2769,6 +2778,7 @@ export interface WorkflowsSelect<T extends boolean = true> {
   maxRetries?: T;
   retryDelay?: T;
   timeout?: T;
+  discardRunWhen?: T;
   updatedAt?: T;
   createdAt?: T;
   _status?: T;

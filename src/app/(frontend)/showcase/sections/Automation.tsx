@@ -48,10 +48,12 @@ export const AutomationShowcase = async () => {
         'Webhook trigger behind a hashed secret: kiln alerts that page the technician and broadcast studio news',
         'Global-hook trigger: opening hours changed in Site settings',
         'Scheduled (cron) trigger in the studio’s timezone: a morning report at 07:00, fired by Payload’s job scheduler',
+        'Schedules run from the moment the server starts: instrumentation.ts boots Payload with its job crons, no first visitor needed',
         'Manual run from server code, behind an admin-only button',
         'Read, create, send-email and HTTP request steps, with dependencies, step conditions and step outputs',
-        'Step retries: the pager call is tried up to three times before the alert run fails',
-        'A custom step: the shop’s own task that releases unpaid orders, run every 15 minutes',
+        'Step retries, error handling and a run timeout, declared with each workflow in code: the pager call is tried up to three times before the alert run fails',
+        'A custom step: the shop’s own task that releases unpaid orders, run every minute',
+        'Idle runs discarded: a minute with no order to release leaves nothing in the run history',
         'Run history with every step’s result, here and in the admin panel',
       ]}
       usedOn={[

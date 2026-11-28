@@ -27,14 +27,14 @@ importers:
         specifier: 3.94.2
         version: 3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)
       '@xtr-dev/payload-automation':
-        specifier: ^0.5.0
-        version: 0.5.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
-      '@xtr-dev/payload-billing':
         specifier: ^0.6.0
-        version: 0.6.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(stripe@22.6.2(@types/node@22.19.9))
+        version: 0.6.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
+      '@xtr-dev/payload-billing':
+        specifier: ^0.7.0
+        version: 0.7.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(stripe@22.6.2(@types/node@22.19.9))
       '@xtr-dev/payload-ecommerce':
-        specifier: ^0.1.0
-        version: 0.1.0(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))
+        specifier: ^0.2.0
+        version: 0.2.0(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))
       '@xtr-dev/payload-feature-flags':
         specifier: ^0.3.0
         version: 0.3.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)
@@ -2190,8 +2190,8 @@ packages:
   '@vscode/diff@0.0.2-145':
     resolution: {integrity: sha512-atPcmNrAU4B8OsbrmqYlHbZREt//m8z52o400YA8uuvq3Be5wnmIhLoLqhMum7Jv7kRC0FE+m3WAUbaZF681wg==}
 
-  '@xtr-dev/payload-automation@0.5.0':
-    resolution: {integrity: sha512-i6JmPQYsT48LDGAkGQ3bq36SzoIKqhbO6z6IlmcA9objdbtfj8WBB5qcmE2ExRyzW2FSs4Ht4DYVDLqpZ/etzg==}
+  '@xtr-dev/payload-automation@0.6.0':
+    resolution: {integrity: sha512-0ej/ZiEK1JjJ8HyXEd3c3b+JYBsPdtEC8Lsw9RRdGuS8m852JrODHwpBuExr6d32tBed2ayCk/OuXpTbKikOww==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       '@payloadcms/ui': ^3.79.1
@@ -2201,16 +2201,16 @@ packages:
       '@payloadcms/ui':
         optional: true
 
-  '@xtr-dev/payload-billing@0.6.0':
-    resolution: {integrity: sha512-7n9e5hh7yvgKAe3S/VbJGzX0hrmorD5k/mZ1A5qdgYZQBKk7q2GdtaGY8KhdVf0wcAWZvGjrFEh+3cHpj+ooxA==}
+  '@xtr-dev/payload-billing@0.7.0':
+    resolution: {integrity: sha512-rpgmlb5T4IOkiH+KrzwYtwVzyjHS8wFYgw3L8NdPcC65XLsEUHmzzbb9R0kGBZGGkSb6tOvHiAazpUM58GJ06w==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       '@mollie/api-client': ^3.7.0 || ^4.0.0
       payload: ^3.37.0
       stripe: ^18.5.0 || ^19.0.0 || ^20.0.0 || ^21.0.0 || ^22.0.0
 
-  '@xtr-dev/payload-ecommerce@0.1.0':
-    resolution: {integrity: sha512-uGCNx6HIuz80qZcJNCsAYiMbQBeg/yJTF/BEtb61grhRxQDw21rt3JWwZFhhQpDz+Cz4Tiygd5LrSsTUD2z9dQ==}
+  '@xtr-dev/payload-ecommerce@0.2.0':
+    resolution: {integrity: sha512-OuUMKrhDYdUNH1ovvSDz4CGZYR9bkXkP8lVZh15sV09kPXBqZA8IEXErwZCfzPW1TV2jZ8BRAP7raWFVI5+8Bg==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       payload: ^3.37.0
@@ -6667,7 +6667,7 @@ snapshots:
 
   '@vscode/diff@0.0.2-145': {}
 
-  '@xtr-dev/payload-automation@0.5.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
+  '@xtr-dev/payload-automation@0.6.0(@payloadcms/ui@3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react@19.2.9)':
     dependencies:
       croner: 9.1.0
       jsonata: 2.2.2
@@ -6676,13 +6676,13 @@ snapshots:
     optionalDependencies:
       '@payloadcms/ui': 3.94.2(@types/react@19.2.14)(monaco-editor@0.58.0)(next@16.4.6(@babel/core@7.29.13)(@playwright/test@1.63.0)(@types/node@22.19.9)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(sass@1.77.4))(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(typescript@5.7.3)
 
-  '@xtr-dev/payload-billing@0.6.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(stripe@22.6.2(@types/node@22.19.9))':
+  '@xtr-dev/payload-billing@0.7.0(@mollie/api-client@4.6.0)(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))(stripe@22.6.2(@types/node@22.19.9))':
     dependencies:
       '@mollie/api-client': 4.6.0
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
       stripe: 22.6.2(@types/node@22.19.9)
 
-  '@xtr-dev/payload-ecommerce@0.1.0(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))':
+  '@xtr-dev/payload-ecommerce@0.2.0(payload@3.94.2(graphql@16.15.0)(typescript@5.7.3))':
     dependencies:
       payload: 3.94.2(graphql@16.15.0)(typescript@5.7.3)
 
