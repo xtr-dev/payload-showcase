@@ -134,6 +134,11 @@ storefront does. Its server actions (`src/components/shop/actions.ts`) and pages
   order is created. A refusal carries a `reason` (`expired`, `min_purchase`, `customer_limit`, …),
   which `couponRefusal` turns into the shop's own message. A once-per-customer code needs a
   signed-in member: the plugin refuses it for a guest with `customer_required`.
+- **Rejected orders.** The cart and the coupon are checked before checkout, but another order can
+  take the last units or the coupon's last use in between. The plugin then rejects the order with
+  an error that carries its cause. `placeOrder` reads it with `getOrderRejection(error)` and
+  `orderRefusal` words it: which product is short and how many are left, or why the code no longer
+  applies. Any other error is logged and the customer gets a general message.
 - **Checkout.** `/shop/checkout` → `placeOrder`: validates the address (and a guest's email), sets
   the cart's `user` to the signed-in member or nobody, and calls `createOrderFromCart`, which
   prices the lines, applies the coupon and takes the stock. `beginOrderCheckout` then creates an
@@ -147,9 +152,19 @@ storefront does. Its server actions (`src/components/shop/actions.ts`) and pages
   fully refunded → `refunded`. The plugin restocks and gives the coupon use back on cancel and
   refund. Admins refund from the order's sidebar (`POST /api/orders/:id/refund`).
 - **Order page.** `/shop/orders/[orderNumber]` is where the provider returns the customer. It is
-  shown to the holder of the order's token (`?t=`, an HMAC of the order number under the Payload
-  secret; this is how a guest gets back to their order, and the link in the confirmation email
-  carries it), to the signed-in member who placed the order and to admins. Everyone else gets a 404. Orders are never readable by number or id alone, and guest orders not through the API at all.
+  shown to the holder of the order's access token (`?t=`), to the signed-in member who placed the
+  order and to admins. Everyone else gets a 404. Orders are never readable by number or id alone,
+  and guest orders not through the API at all.
+- **Order link token.** The plugin gives every order a random `accessToken` when it is created
+  and checks it with `orders.getOrderByToken({ orderNumber, token })`; the site has no token
+  scheme of its own. This is how a guest gets back to their order. The plugin hides the field from
+  REST, GraphQL and the admin panel for everyone, admins included, so only server code can build
+  the link: `orderPath` takes the token from an order read with the Local API, for the redirect
+  after payment (the payment's `redirectUrl`) and for the links in the confirmation and shipped
+  emails. Nothing accepts a token from the browser except to compare it. Workflow runs keep a
+  snapshot of the order that triggered them, so `src/plugins/automation.ts` removes the token
+  before a run is stored. An order created before the plugin had the field has no token and opens
+  only for its member or an admin.
 - **Tie-ins.** An orders `afterChange` hook sends the `order-confirmation` email when an order
   becomes paid. When it ships, the hook sends the `order-shipped` email (to the order's
   `customerEmail`, so guests get it too) and notifies the member on the `orders` channel. Each goes

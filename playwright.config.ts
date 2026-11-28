@@ -13,7 +13,9 @@ export default defineConfig({
   testMatch: '**/*.e2e.spec.ts',
   globalSetup: './tests/e2e/global-setup.ts',
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No retries, in CI either: a test that only passes on a second attempt is a failure to look
+  // into, and a retry would report it as passed.
+  retries: 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {

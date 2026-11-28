@@ -229,7 +229,7 @@ const templates = (featured: Workshop | undefined) => [
   },
   {
     // Sent by sendOrderConfirmation (src/lib/shop.ts) when a shop order is paid. Amounts are in
-    // euros; the link carries the order's token, so a guest can open their order from the email.
+    // euros; the link carries the order's access token, so a guest can open their order from the email.
     name: 'Shop order confirmation',
     slug: TEMPLATES.orderConfirmation,
     subject: 'Your Kiln & Co. order {{ orderNumber }}',
@@ -258,7 +258,7 @@ const templates = (featured: Workshop | undefined) => [
       preheader: 'Your order is paid and on its way to the packing table.',
       firstName: 'Mara',
       orderNumber: 'ORD-1764000000000-042',
-      orderToken: '0000000000000000000000000000000000000000',
+      orderToken: 'sample-token-000000000000000000000000000000',
       items: '2 × Speckled mug (Celadon), 1 × Breakfast bowl',
       shipping: 0,
       discount: 9,
@@ -268,7 +268,7 @@ const templates = (featured: Workshop | undefined) => [
   },
   {
     // Sent by sendOrderShipped (src/lib/shop.ts) when a shop order is set to shipped. The link
-    // carries the order's token, so a guest can open their order from the email.
+    // carries the order's access token, so a guest can open their order from the email.
     name: 'Shop order shipped',
     slug: TEMPLATES.orderShipped,
     subject: 'Your Kiln & Co. order {{ orderNumber }} has shipped',
@@ -296,7 +296,7 @@ const templates = (featured: Workshop | undefined) => [
       preheader: 'Your order has left the studio.',
       firstName: 'Mara',
       orderNumber: 'ORD-1764000000000-042',
-      orderToken: '0000000000000000000000000000000000000000',
+      orderToken: 'sample-token-000000000000000000000000000000',
       trackingNumber: '3SKILN0042',
       items: '2 × Speckled mug (Celadon), 1 × Breakfast bowl',
       shipTo: 'Mara de Vries, Strandweg 12, 2042 AA Zandvoort',
