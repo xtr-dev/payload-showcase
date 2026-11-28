@@ -46,7 +46,7 @@ const payOnTestProvider = async (page: Page, scenario: string) => {
   await page.locator(`.scenario[data-scenario="${scenario}"]`).click()
   await page.getByRole('button', { name: 'Process Test Payment' }).click()
   // The provider sends the customer back to the order page, with the order's token.
-  await page.waitForURL(/\/shop\/orders\/ORD-[\d-]+\?t=[0-9a-f]{40}$/, { timeout: 20_000 })
+  await page.waitForURL(/\/shop\/orders\/ORD-[\d-]+\?t=[A-Za-z0-9_-]{43}$/, { timeout: 20_000 })
 }
 
 test.describe('Shop (payload-ecommerce)', () => {
